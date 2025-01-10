@@ -1,6 +1,6 @@
-====================================
-Scipion plugin for Relion Tomography
-====================================
+=============================
+Scipion plugin for GAPSTOP_TM
+=============================
 
 .. image:: https://img.shields.io/pypi/v/scipion-em-gapstop.svg
         :target: https://pypi.python.org/pypi/scipion-em-gapstop
