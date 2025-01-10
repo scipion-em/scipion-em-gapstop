@@ -33,7 +33,7 @@ a) Stable version:
 
 .. code-block::
 
-    scipion3 installp -p scipion-em-fidder
+    scipion3 installp -p scipion-em-gapstop
 
 b) Developer's version
 
@@ -41,19 +41,19 @@ b) Developer's version
 
     .. code-block::
 
-        git clone -b devel https://github.com/scipion-em/scipion-em-fidder.git
+        git clone -b devel https://github.com/scipion-em/scipion-em-gapstop.git
 
     * install:
 
     .. code-block::
 
-        scipion3 installp -p /path/to/scipion-em-fidder --devel
+        scipion3 installp -p /path/to/scipion-em-gapstop --devel
 
 To check the installation, simply run the following Scipion test for the plugin:
 
     .. code-block::
 
-        scipion3 tests fidder.tests.tests_fidder.TestFidder
+        scipion3 tests gapstop.tests.tests_gapstop.Testgapstop
 
 Protocols
 -----------
