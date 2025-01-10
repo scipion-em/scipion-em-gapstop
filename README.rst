@@ -18,15 +18,15 @@ Scipion plugin for GAPSTOP_TM
         :target: https://pypi.python.org/pypi/scipion-em-gapstop
         :alt: Downloads
 
-This plugin provide a wrapper around the program `GAPSTOP_TM <https://bturo.pages.mpcdf.de/gapstop_tm/index.html>`_
-(GPU-Accelerated Python STOPgap for Template Matching). to use it within
+This plugin provides a wrapper around the program `GAPSTOP_TM <https://bturo.pages.mpcdf.de/gapstop_tm/index.html>`_
+(GPU-Accelerated Python STOPgap for Template Matching) to use it within
 `Scipion <https://scipion-em.github.io/docs/release-3.0.0/index.html>`_ framework.
 
 Installation
 ------------
 
 You will need to use `3.0 <https://scipion-em.github.io/docs/release-3.0.0/docs/scipion-modes/how-to-install.html>`_
-version of Scipion to be able to run these protocols. To install the plugin, you have two options:
+version of Scipion to run these protocols. To install the plugin, you have two options:
 
 
 a) Stable version:
