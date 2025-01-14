@@ -131,8 +131,10 @@ class Plugin(pwem.Plugin):
         cmd = cls.getCondaActivationCmd() + " "
         cmd += cls.getGapStopEnvActivation()
         if isCryoCatExec:
-            cmd += f" && CUDA_VISIBLE_DEVICES=%(GPU)s "
-        cmd += f"{program} "
+            cmd += f" && {program} "
+        else:
+            cmd += f" && CUDA_VISIBLE_DEVICES=%(GPU)s {program} "
+
         protocol.runJob(cmd, args, env=cls.getEnviron(), cwd=cwd, numberOfMpi=numberOfMpi)
 
 
