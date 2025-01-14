@@ -125,11 +125,14 @@ class Plugin(pwem.Plugin):
             neededProgs.append('conda')
         return neededProgs
 
-    # @classmethod
-    # def runFidder(cls, protocol, args, cwd=None, numberOfMpi=1):
-    #     """ Run gapstop command from a given protocol. """
-    #     cmd = cls.getCondaActivationCmd() + " "
-    #     cmd += cls.getFidderEnvActivation()
-    #     cmd += f" && CUDA_VISIBLE_DEVICES=%(GPU)s {GAPSTOP} "
-    #     protocol.runJob(cmd, args, env=cls.getEnviron(), cwd=cwd, numberOfMpi=numberOfMpi)
+    @classmethod
+    def runGapStop(cls, protocol, program, args, cwd=None, numberOfMpi=1, isCryoCatExec=False):
+        """ Run gapstop command from a given protocol. """
+        cmd = cls.getCondaActivationCmd() + " "
+        cmd += cls.getGapStopEnvActivation()
+        if isCryoCatExec:
+            cmd += f" && CUDA_VISIBLE_DEVICES=%(GPU)s "
+        cmd += f"{program} "
+        protocol.runJob(cmd, args, env=cls.getEnviron(), cwd=cwd, numberOfMpi=numberOfMpi)
+
 
