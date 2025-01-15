@@ -26,10 +26,11 @@
 # **************************************************************************
 import logging
 from enum import Enum
-from os.path import abspath, join
+from os.path import abspath, join, basename
 from typing import Union, List
 
 import numpy as np
+from emtable import Table
 
 from gapstop import Plugin
 from pwem.emlib.image import ImageHandler
@@ -39,9 +40,9 @@ from pyworkflow import BETA
 from pyworkflow.object import Pointer
 from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, \
     LEVEL_ADVANCED
-from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr
+from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr, removeBaseExt
 from scipion.constants import PYTHON
-from tomo.objects import SetOfCoordinates3D, SetOfTomograms, Tomogram, SetOfTiltSeries, CTFTomo
+from tomo.objects import SetOfCoordinates3D, SetOfTomograms, Tomogram, SetOfTiltSeries, CTFTomo, SetOfCTFTomoSeries
 from tomo.utils import getObjFromRelation
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,24 @@ IN_MASK = 'inMask'
 # Files and extensions
 MRC = '.mrc'
 TLT = '.tlt'
+# tm_param.star columns
+ROOTDIR = "rootdir"
+OUTPUTDIR = "outputdir"
+VOL_EXT = "vol_ext"
+TOMO_NAME = "tomo_name"
+TOMO_NUM = "tomo_num"
+WEDGELIST_NAME = "wedgelist_name"
+TMPL_NAME = "tmpl_name"
+MASK_NAME = "mask_name"
+SYMMETRY = "symmetry"
+ANGLIST_ORDER = "anglist_order"
+ANGLIST_NAME = "anglist_name"
+SMAP_NAME = "smap_name"
+OMAP_NAME = "omap_name"
+LP_RAD = "lp_rad"
+HP_RAD = "hp_rad"
+BINNING = "binning"
+TILING = "tiling"
 
 
 class gapStopOutputs(Enum):
@@ -78,6 +97,8 @@ class ProtGapStopTemplateMatching(EMProtocol):
         self.tomoDict = None
         self.tsDict = None
         self.ctfDict = None
+        self.refName = None
+        self.maskName = None
         self.ih = ImageHandler()
 
     # --------------------------- DEFINE param functions ----------------------
@@ -90,23 +111,29 @@ class ProtGapStopTemplateMatching(EMProtocol):
         form.addParam(IN_CTF_SET, PointerParam,
                       pointerClass='SetOfCTFTomoSeries',
                       label="CTF tomo series",
-                      allowsNull=True,
-                      help='They are optional in case of the re-extraction of Relion particles.')
+                      important=True,
+                      allowsNull=True)
         form.addParam(IN_TS_SET, PointerParam,
                       pointerClass='SetOfTiltSeries',
                       allowsNull=True,
                       expertLevel=LEVEL_ADVANCED,
                       label='Tilt-series (opt.)',
-                      help='Used to get the tilt angles. If empty, the protocol will try to reach, via relations,'
-                           ' the tilt-series associated to the introduced tomograms.')
-        # form.addParam(REF_VOL, PointerParam,
-        #               pointerClass='Volume',
-        #               important=True,
-        #               label="Reference volume")
-        # form.addParam(IN_MASK, PointerParam,
-        #               pointerClass=VolumeMask,
-        #               important=True,
-        #               label='Reference mask')
+                      help='Used to get the tilt angles. If empty, the protocol will try to reach, via relations, '
+                           'the tilt-series associated to the introduced tomograms.')
+        form.addParam(REF_VOL, PointerParam,
+                      pointerClass='Volume',
+                      important=True,
+                      label="Reference volume")
+        form.addParam(IN_MASK, PointerParam,
+                      pointerClass=VolumeMask,
+                      allowsNull=True,
+                      label='Reference mask (opt)',
+                      help='It is used in two ways. First, the bounding box is computed to contain all values '
+                           'equal to 1. This can reduce computation time since the bounding box can be way smaller '
+                           'than the tomogram. The second time, the binary mask is used, is by outputing '
+                           'scores map where the mask is used to multiply the scores map so only values '
+                           'corresponding to the mask regions with value 1 are kept. For the latter, same '
+                           'effect can be achieved by multiplying the scores map after the TM run.')
         form.addParam('currentBin', IntParam,
                       allowsNull=False,
                       important=True,
@@ -135,8 +162,11 @@ class ProtGapStopTemplateMatching(EMProtocol):
     # --------------------------- INSERT steps functions ----------------------
     def _insertAllSteps(self):
         self._initialize()
+        cRId = self._insertFunctionStep(self.convertReferenceStep,
+                                        prerequisites=[],
+                                        needsGPU=False)
         pAngId = self._insertFunctionStep(self.prepareAnglesStep,
-                                          prerequisites=[],
+                                          prerequisites=cRId,
                                           needsGPU=False)
         for tsId in self.tomoDict.keys():
             cInputId = self._insertFunctionStep(self.convertInputStep, tsId,
@@ -150,6 +180,11 @@ class ProtGapStopTemplateMatching(EMProtocol):
         tsSet = tsSet if tsSet else self._getTsFromRelations()
         tomoSet = self._getFormAttrib(IN_TOMOS)
         ctfSet = self._getFormAttrib(IN_CTF_SET)
+        ref = self._getFormAttrib(REF_VOL)
+        self.refName = self._genConvertedOrLinkedRefName(ref)
+        mask = self._getFormAttrib(IN_MASK)
+        if mask:
+            self.maskName = self._genConvertedOrLinkedRefName(mask)
 
         # Compute matching TS id among coordinates, the tilt-series and the CTFs, they all could be a subset
         tomosTsIds = set(tomoSet.getTSIds())
@@ -165,7 +200,7 @@ class ProtGapStopTemplateMatching(EMProtocol):
 
         if len(nonMatchingTsIds) > 0:
             logger.info(cyanStr(f"TsIds not common in the introduced tomograms, CTFs, and "
-                                f"tilt-series are:\n{presentTsIds}"))
+                                f"tilt-series are: {nonMatchingTsIds}"))
 
         self.tomoDict = {tomo.getTsId(): tomo.clone() for tomo in tomoSet.iterItems()
                          if tomo.getTsId() in presentTsIds}
@@ -174,7 +209,17 @@ class ProtGapStopTemplateMatching(EMProtocol):
         self.ctfDict = {ctf.getTsId(): ctf.clone(ignoreAttrs=[]) for ctf in ctfSet.iterItems()
                         if ctf.getTsId() in presentTsIds}
 
+    def convertReferenceStep(self):
+        # Convert or link the reference
+        ref = self._getFormAttrib(REF_VOL)
+        self._convertOrLinkVolume(ref, self.refName)
+        # Convert or link the mask
+        mask = self._getFormAttrib(IN_MASK)
+        if self.maskName:
+            self._convertOrLinkVolume(mask, self.maskName)
+
     def prepareAnglesStep(self):
+        logger.info(cyanStr('Generating the file with Euler angles specifying the rotations...'))
         angleListFile = self._getCryoCatAngleFile()
         codePatch = f""" 
 from cryocat import geom 
@@ -196,13 +241,15 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
         acq = ts.getAcquisition()
         tsDir = self._getCurrentTomoDir(tsId)
         makePath(tsDir)
+
+        # Convert or link the current tomogram
+        logger.info(cyanStr(f'tsId: {tsId}: converting or linking the tomogram...'))
         inTomoName = self._getWorkingTsIdFile(tsId, MRC)
-        inTltName = self._getWorkingTsIdFile(tsId, TLT)
         self._convertOrLinkVolume(tomo, inTomoName)
-        ts.generateTltFile(inTltName, includeDose=True)
 
         #  Defocus info:
         # "defocus1", "defocus2", "astigmatism", "phase_shift", "defocus_mean"
+        logger.info(cyanStr(f'tsId: {tsId}: generating the wedge list file...'))
         nImgs = len(ctf)
         defocusData = np.zeros((nImgs, 5))
         for i, ctfTomo in enumerate(ctf.iterItems(orderBy=[CTFTomo.INDEX_FIELD], direction='ASC')):
@@ -211,14 +258,17 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
             defocusData[i, 2] = ctfTomo.getDefocusAngle()
             defocusData[i, 4] = (ctfTomo.getDefocusU() + ctfTomo.getDefocusV()) / 2
 
-        # Create the wedge list
+        # Tilt angles and dose
+        inTltName = self._getWorkingTsIdFile(tsId, TLT)
+        ts.generateTltFile(inTltName, includeDose=True)
         tltDoseData = np.loadtxt(inTltName)
         tltData = tltDoseData[:, 0]
         doseData = tltDoseData[:, 1]
+
+        # Create the wedge list
         binfactor = self.currentBin.get()
         unBinnedtomoDims = np.array(tomo.getDimensions()) * binfactor
         unbinnedApix = self.sRate * binfactor
-
         codePatch = f"""
 from cryocat import wedgeutils
 import numpy as np
@@ -248,10 +298,18 @@ drop_nan_columns=True
             pyFile.write(codePatch)
         Plugin.runGapStop(self, PYTHON, genWedgesPythonFile, isCryoCatExec=True)
 
+        # Generate the tm_params.star
+        logger.info(cyanStr(f'tsId: {tsId}: generating the tm_params.star file...'))
+        self._createTmParamsFile(tsId)
+
     # --------------------------- UTILS functions -----------------------------
-    def _getFormAttrib(self, attribName: str, returnPointer: bool = False) -> Union[SetOfTiltSeries, Pointer]:
-        inTsPointer = getattr(self, attribName)
-        return inTsPointer if returnPointer else inTsPointer.get()
+    def _getFormAttrib(self, attribName: str, returnPointer: bool = False) -> Union[SetOfTiltSeries,
+    SetOfTomograms, SetOfCTFTomoSeries, Volume, Pointer, None]:
+        inTsPointer = getattr(self, attribName, None)
+        if not inTsPointer:
+            return None
+        else:
+            return inTsPointer if returnPointer else inTsPointer.get()
 
     def _getTsFromRelations(self) -> Union[SetOfTiltSeries, None]:
         inTomos = self._getFormAttrib(IN_TOMOS)
@@ -269,6 +327,9 @@ drop_nan_columns=True
     def _getWorkingTsIdFile(self, tsId: str, ext: str) -> str:
         return join(self._getCurrentTomoDir(tsId), tsId + ext)
 
+    def _genConvertedOrLinkedRefName(self, mask: Volume) -> str:
+        return self._getExtraPath(removeBaseExt(mask.getFileName()) + MRC)
+
     def _convertOrLinkVolume(self, inVolume: Volume, outVolume: str) -> None:
         """Converts a volume into a compatible MRC file or links it if already compatible"""
         inFn = inVolume.getFileName()
@@ -277,6 +338,63 @@ drop_nan_columns=True
             createLink(abspath(inFn), outVolume)
         else:
             self.ih.convert(inVolume, outVolume)
+
+    def _genTmParamFileName(self, tsId: str) -> str:
+        return join(self._getCurrentTomoDir(tsId), 'tm_params.star')
+
+    def _genCurrentTomoResultsDirName(self, tsId: str) -> str:
+        return join(self._getCurrentTomoDir(tsId), 'results')
+
+    def _createTmParamsFile(self, tsId: str):
+        """See param explanation here -->
+        https://gitlab.mpcdf.mpg.de/bturo/gapstop_tm/-/blob/main/doc/user_manual/tm_params.rst?ref_type=heads"""
+        paramTable = Table(columns=self._getTmParamStarFields())
+        with open(self._genTmParamFileName(tsId), 'w') as f:
+            paramList = [
+                self._getCurrentTomoDir(tsId),  # rootdir
+                self._genCurrentTomoResultsDirName(tsId),  # outputdir
+                MRC, # vol_ext
+                basename(self._getWorkingTsIdFile(tsId, MRC)),  # tomo_name
+                tsId, # tomo_num,
+                basename(self._getCryoCatWedgesFiles(tsId)),  # wedgelist_name
+                join('..', basename(self.refName)),  # template_name
+                f'C{self.rotSymDeg.get()}',  # symmetry
+                'zxz',  # angslist_order
+                join('..', basename(self._getCryoCatAngleFile())),  # anglist_name
+                'scores',  # smap_name
+                'angles',  # omap_name
+                'TODO',  # lp_rad
+                'TODO',  # hp_rad
+                self.currentBin.get(),  # tomogram_binning
+                'new'  # tiling
+            ]
+            if self.maskName:
+                paramList.append(join('..', self.maskName))  # tomo_mask_name
+            paramTable.addRow(*paramList)
+            paramTable.writeStar(f, tableName=tsId)
+
+    def _getTmParamStarFields(self):
+        tmPramList = [
+            ROOTDIR,
+            OUTPUTDIR,
+            VOL_EXT,
+            TOMO_NAME,
+            TOMO_NUM,
+            WEDGELIST_NAME,
+            TMPL_NAME,
+            SYMMETRY,
+            ANGLIST_ORDER,
+            ANGLIST_NAME,
+            SMAP_NAME,
+            OMAP_NAME,
+            LP_RAD,
+            HP_RAD,
+            BINNING,
+            TILING
+        ]
+        if self.maskName:
+            tmPramList.append(MASK_NAME)
+        return tmPramList
 
     # --------------------------- INFO functions ------------------------------
     def _validate(self) -> List[str]:
