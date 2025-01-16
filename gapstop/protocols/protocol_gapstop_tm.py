@@ -38,11 +38,10 @@ from pwem.objects import VolumeMask, Volume
 from pwem.protocols import EMProtocol
 from pyworkflow import BETA
 from pyworkflow.object import Pointer
-from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, \
-    LEVEL_ADVANCED
+from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST
 from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr, removeBaseExt
 from scipion.constants import PYTHON
-from tomo.objects import SetOfCoordinates3D, SetOfTomograms, Tomogram, SetOfTiltSeries, CTFTomo, SetOfCTFTomoSeries
+from tomo.objects import SetOfCoordinates3D, SetOfTomograms, SetOfTiltSeries, CTFTomo, SetOfCTFTomoSeries
 from tomo.utils import getObjFromRelation
 
 logger = logging.getLogger(__name__)
@@ -90,6 +89,7 @@ class ProtGapStopTemplateMatching(EMProtocol):
     _devStatus = BETA
     _possibleOutputs = gapStopOutputs
     stepsExecutionMode = STEPS_PARALLEL
+    program = 'gapstop'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -116,7 +116,7 @@ class ProtGapStopTemplateMatching(EMProtocol):
         form.addParam(IN_TS_SET, PointerParam,
                       pointerClass='SetOfTiltSeries',
                       allowsNull=True,
-                      expertLevel=LEVEL_ADVANCED,
+                      important=True,
                       label='Tilt-series (opt.)',
                       help='Used to get the tilt angles. If empty, the protocol will try to reach, via relations, '
                            'the tilt-series associated to the introduced tomograms.')
@@ -126,8 +126,8 @@ class ProtGapStopTemplateMatching(EMProtocol):
                       label="Reference volume")
         form.addParam(IN_MASK, PointerParam,
                       pointerClass=VolumeMask,
-                      allowsNull=True,
-                      label='Reference mask (opt)',
+                      important=True,
+                      label='Reference mask',
                       help='It is used in two ways. First, the bounding box is computed to contain all values '
                            'equal to 1. This can reduce computation time since the bounding box can be way smaller '
                            'than the tomogram. The second time, the binary mask is used, is by outputing '
@@ -154,6 +154,20 @@ class ProtGapStopTemplateMatching(EMProtocol):
                        label='Degree of rotational symmetry',
                        help='From 1, 2, ... to N, representing symmetries C1, C2, ... to CN, respectively. In case '
                             'of non-rotational symmetry, set it ti 1 (default).')
+        group = form.addGroup('Template filtering')
+        group.addParam('lowPassFilter', FloatParam,
+                       default=20,
+                       label='Low-pass filter radius in Fourier px.',
+                       help='To compute this value from the desired resolution, use following formula: '
+                            'round(template_box_size * pixel_size / resolution) where template_box_size '
+                            'is one dimension of the template.')
+        group.addParam('highPassFilter', FloatParam,
+                       default=1,
+                       label='High-pass filter radius in Fourier px.',
+                       help='In most cases the optimal value is 1 (i.e. no high-pass filter). To compute '
+                            'this value from the desired resolution, use following formula: '
+                            'round(template_box_size * pixel_size / resolution) where template_box_size '
+                            'is one dimension of the template.')
         form.addHidden(GPU_LIST, StringParam,
                        default='0',
                        label="Choose GPU IDs")
@@ -172,6 +186,9 @@ class ProtGapStopTemplateMatching(EMProtocol):
             cInputId = self._insertFunctionStep(self.convertInputStep, tsId,
                                                 prerequisites=pAngId,
                                                 needsGPU=False)
+            tmId = self._insertFunctionStep(self.templateMatchingStep, tsId,
+                                            prerequisites=cInputId,
+                                            needsGPU=True)
 
     # -------------------------- STEPS functions ------------------------------
     def _initialize(self):
@@ -181,10 +198,9 @@ class ProtGapStopTemplateMatching(EMProtocol):
         tomoSet = self._getFormAttrib(IN_TOMOS)
         ctfSet = self._getFormAttrib(IN_CTF_SET)
         ref = self._getFormAttrib(REF_VOL)
-        self.refName = self._genConvertedOrLinkedRefName(ref)
         mask = self._getFormAttrib(IN_MASK)
-        if mask:
-            self.maskName = self._genConvertedOrLinkedRefName(mask)
+        self.refName = self._genConvertedOrLinkedRefName(ref)
+        self.maskName = self._genConvertedOrLinkedRefName(mask)
 
         # Compute matching TS id among coordinates, the tilt-series and the CTFs, they all could be a subset
         tomosTsIds = set(tomoSet.getTSIds())
@@ -215,8 +231,7 @@ class ProtGapStopTemplateMatching(EMProtocol):
         self._convertOrLinkVolume(ref, self.refName)
         # Convert or link the mask
         mask = self._getFormAttrib(IN_MASK)
-        if self.maskName:
-            self._convertOrLinkVolume(mask, self.maskName)
+        self._convertOrLinkVolume(mask, self.maskName)
 
     def prepareAnglesStep(self):
         logger.info(cyanStr('Generating the file with Euler angles specifying the rotations...'))
@@ -239,6 +254,7 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
         ts = self.tsDict[tsId]
         ctf = self.ctfDict[tsId]
         acq = ts.getAcquisition()
+        tomoObjId = tomo.getObjId()
         tsDir = self._getCurrentTomoDir(tsId)
         makePath(tsDir)
 
@@ -266,6 +282,7 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
         doseData = tltDoseData[:, 1]
 
         # Create the wedge list
+        wedgesStarFile = self._getCryoCatWedgesFiles(tsId)
         binfactor = self.currentBin.get()
         unBinnedtomoDims = np.array(tomo.getDimensions()) * binfactor
         unbinnedApix = self.sRate * binfactor
@@ -279,9 +296,9 @@ tlt_data = np.array({np.array2string(tltData, separator=', ')})
 ctf_data = np.array({np.array2string(defocusData, separator=', ')})
 dose_data = np.array({np.array2string(doseData, separator=', ')})
 wedgeutils.create_wedge_list_sg(
-tomo_id='{tsId}',
+tomo_id='{tomoObjId}',
 tomo_dim=tomo_dim,
-pixel_size={unbinnedApix},
+pixel_size={unbinnedApix:.3f},
 tlt_file=tlt_data,
 z_shift=0.0,
 ctf_file=ctf_data,
@@ -289,7 +306,7 @@ dose_file=dose_data,
 voltage={acq.getVoltage()},
 amp_contrast={acq.getAmplitudeContrast()},
 cs={acq.getSphericalAberration()},
-output_file='{self._getCryoCatWedgesFiles(tsId)}',
+output_file='{wedgesStarFile}',
 drop_nan_columns=True
 )
 """
@@ -297,10 +314,19 @@ drop_nan_columns=True
         with open(genWedgesPythonFile, "w") as pyFile:
             pyFile.write(codePatch)
         Plugin.runGapStop(self, PYTHON, genWedgesPythonFile, isCryoCatExec=True)
+        self._fixWedgesFile(wedgesStarFile)
 
         # Generate the tm_params.star
         logger.info(cyanStr(f'tsId: {tsId}: generating the tm_params.star file...'))
-        self._createTmParamsFile(tsId)
+        self._createTmParamsFile(tsId, tomoObjId)
+
+    def templateMatchingStep(self, tsId: str):
+        logger.info(cyanStr(f'===> tsId = {tsId}: performing the template matching...'))
+        args = 'run_tm '
+        args += f'-n {self.nTiles.get()} '
+        args += f'{self._genTmParamFileName(tsId)}'
+        Plugin.runGapStop(self, self.program, args)
+
 
     # --------------------------- UTILS functions -----------------------------
     def _getFormAttrib(self, attribName: str, returnPointer: bool = False) -> Union[SetOfTiltSeries,
@@ -342,39 +368,52 @@ drop_nan_columns=True
     def _genTmParamFileName(self, tsId: str) -> str:
         return join(self._getCurrentTomoDir(tsId), 'tm_params.star')
 
-    def _genCurrentTomoResultsDirName(self, tsId: str) -> str:
-        return join(self._getCurrentTomoDir(tsId), 'results')
+    @staticmethod
+    def _fixWedgesFile(wedgesStarFile):
+        """There is a bug in the wedges star file generation that introduces a blank line between
+        the column names and the contents. This causes the template matching program to detect it
+        as an empty star file. Therefore, we will remove the blank lines from that file."""
+        # Read the wedges file
+        with open(wedgesStarFile, 'r') as file:
+            lineas = file.readlines()
 
-    def _createTmParamsFile(self, tsId: str):
+        # Remove the blank lines
+        lineas = [linea for linea in lineas if linea.strip() != '']
+
+        # Overwrite the file with the fixed contents
+        with open(wedgesStarFile, 'w') as file:
+            file.writelines(lineas)
+
+    def _createTmParamsFile(self, tsId: str, tomoObjId: int):
         """See param explanation here -->
         https://gitlab.mpcdf.mpg.de/bturo/gapstop_tm/-/blob/main/doc/user_manual/tm_params.rst?ref_type=heads"""
         paramTable = Table(columns=self._getTmParamStarFields())
         with open(self._genTmParamFileName(tsId), 'w') as f:
             paramList = [
-                self._getCurrentTomoDir(tsId),  # rootdir
-                self._genCurrentTomoResultsDirName(tsId),  # outputdir
+                self._getCurrentTomoDir(tsId) + '/',  # rootdir
+                'results/',  # outputdir
                 MRC, # vol_ext
                 basename(self._getWorkingTsIdFile(tsId, MRC)),  # tomo_name
-                tsId, # tomo_num,
+                tomoObjId, # tomo_num,
                 basename(self._getCryoCatWedgesFiles(tsId)),  # wedgelist_name
                 join('..', basename(self.refName)),  # template_name
+                join('..', basename(self.maskName)),  # tomo_mask_name
                 f'C{self.rotSymDeg.get()}',  # symmetry
                 'zxz',  # angslist_order
                 join('..', basename(self._getCryoCatAngleFile())),  # anglist_name
                 'scores',  # smap_name
                 'angles',  # omap_name
-                'TODO',  # lp_rad
-                'TODO',  # hp_rad
+                self.lowPassFilter.get(),  # lp_rad
+                self.highPassFilter.get(),  # hp_rad
                 self.currentBin.get(),  # tomogram_binning
                 'new'  # tiling
             ]
-            if self.maskName:
-                paramList.append(join('..', self.maskName))  # tomo_mask_name
             paramTable.addRow(*paramList)
             paramTable.writeStar(f, tableName=tsId)
 
-    def _getTmParamStarFields(self):
-        tmPramList = [
+    @staticmethod
+    def _getTmParamStarFields():
+        return [
             ROOTDIR,
             OUTPUTDIR,
             VOL_EXT,
@@ -382,6 +421,7 @@ drop_nan_columns=True
             TOMO_NUM,
             WEDGELIST_NAME,
             TMPL_NAME,
+            MASK_NAME,
             SYMMETRY,
             ANGLIST_ORDER,
             ANGLIST_NAME,
@@ -390,11 +430,7 @@ drop_nan_columns=True
             LP_RAD,
             HP_RAD,
             BINNING,
-            TILING
-        ]
-        if self.maskName:
-            tmPramList.append(MASK_NAME)
-        return tmPramList
+            TILING]
 
     # --------------------------- INFO functions ------------------------------
     def _validate(self) -> List[str]:
