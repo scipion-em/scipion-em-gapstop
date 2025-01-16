@@ -30,6 +30,7 @@ from os.path import abspath, join, basename
 from typing import Union, List
 
 import numpy as np
+from SCons.Tool import suffix
 from emtable import Table
 
 from gapstop import Plugin
@@ -49,10 +50,11 @@ logger = logging.getLogger(__name__)
 IN_TOMOS = 'inTomos'
 IN_CTF_SET = 'inCtfSet'
 IN_TS_SET = 'inTsSet'
-REF_VOL = 'refVol'
-IN_MASK = 'inMask'
+REF_VOL = 'reference'
+IN_MASK = 'mask'
 # Files and extensions
 MRC = '.mrc'
+EM = '.em'
 TLT = '.tlt'
 # tm_param.star columns
 ROOTDIR = "rootdir"
@@ -72,7 +74,11 @@ LP_RAD = "lp_rad"
 HP_RAD = "hp_rad"
 BINNING = "binning"
 TILING = "tiling"
-
+#  Other params
+RESULTS_DIR = 'results'
+SCORES = 'scores'
+ANGLES = 'angles'
+PARTICLE_LIST_FILE = 'particleList'
 
 class gapStopOutputs(Enum):
     coordinates = SetOfCoordinates3D
@@ -139,6 +145,10 @@ class ProtGapStopTemplateMatching(EMProtocol):
                       important=True,
                       label='Tomogram current binning factor',
                       help='Used to get the tomogram unbinned dimensions and sampling rate during the processing.')
+        form.addParam('partDiameter', FloatParam,
+                      default=20,
+                      label='Particle diameter',
+                      help='Diameter of the particle to be used for extraction and clustering.')
         form.addParam('nTiles', IntParam,
                       default=1,
                       label='No. tiles to decompose the tomogram')
@@ -189,6 +199,9 @@ class ProtGapStopTemplateMatching(EMProtocol):
             tmId = self._insertFunctionStep(self.templateMatchingStep, tsId,
                                             prerequisites=cInputId,
                                             needsGPU=True)
+            peId = self._insertFunctionStep(self.extractCoordinatesStep, tsId,
+                                            prerequisites=tmId,
+                                            needsGPU=False)
 
     # -------------------------- STEPS functions ------------------------------
     def _initialize(self):
@@ -197,10 +210,8 @@ class ProtGapStopTemplateMatching(EMProtocol):
         tsSet = tsSet if tsSet else self._getTsFromRelations()
         tomoSet = self._getFormAttrib(IN_TOMOS)
         ctfSet = self._getFormAttrib(IN_CTF_SET)
-        ref = self._getFormAttrib(REF_VOL)
-        mask = self._getFormAttrib(IN_MASK)
-        self.refName = self._genConvertedOrLinkedRefName(ref)
-        self.maskName = self._genConvertedOrLinkedRefName(mask)
+        self.refName = self._genConvertedOrLinkedRefName(REF_VOL)
+        self.maskName = self._genConvertedOrLinkedRefName(IN_MASK)
 
         # Compute matching TS id among coordinates, the tilt-series and the CTFs, they all could be a subset
         tomosTsIds = set(tomoSet.getTSIds())
@@ -307,8 +318,7 @@ voltage={acq.getVoltage()},
 amp_contrast={acq.getAmplitudeContrast()},
 cs={acq.getSphericalAberration()},
 output_file='{wedgesStarFile}',
-drop_nan_columns=True
-)
+drop_nan_columns=True)
 """
         genWedgesPythonFile = join(self._getCurrentTomoDir(tsId), 'genWedgesList.py')
         with open(genWedgesPythonFile, "w") as pyFile:
@@ -327,6 +337,37 @@ drop_nan_columns=True
         args += f'{self._genTmParamFileName(tsId)}'
         Plugin.runGapStop(self, self.program, args)
 
+    def extractCoordinatesStep(self, tsId: str):
+        tomo = self.tomoDict[tsId]
+        tomoObjId = tomo.getObjId()
+        scoresMapFile = self._getResultsFile(tsId, f'{SCORES}_0_{tomoObjId}')
+        anglesMapFile = self._getResultsFile(tsId, f'{ANGLES}_0_{tomoObjId}')
+        outParticleListFile = self._getResultsFile(tsId, PARTICLE_LIST_FILE)
+        codePatch = f"""
+from cryocat import tmana        
+
+tmana.scores_extract_particles(
+scores_map='{scoresMapFile}',
+angles_map='{anglesMapFile}',
+angles_list='{self._getCryoCatAngleFile()}',
+tomo_id={tomo.getObjId()},
+particle_diameter={self.partDiameter.get()},
+object_id=None,
+scores_threshold=None,
+sigma_threshold=None,
+cluster_size=None,
+n_particles=None,
+output_path='{outParticleListFile}',
+output_type='emmotl',
+angles_order='zxz',
+symmetry='{self._getSymmetry()}',
+angles_numbering=0)
+"""
+        extractCoordsPythonFile = join(self._getCurrentTomoDir(tsId), 'extractCoords.py')
+        with open(extractCoordsPythonFile, "w") as pyFile:
+            pyFile.write(codePatch)
+        Plugin.runGapStop(self, PYTHON, extractCoordsPythonFile, isCryoCatExec=True)
+
 
     # --------------------------- UTILS functions -----------------------------
     def _getFormAttrib(self, attribName: str, returnPointer: bool = False) -> Union[SetOfTiltSeries,
@@ -342,7 +383,7 @@ drop_nan_columns=True
         return getObjFromRelation(inTomos, self, SetOfTiltSeries)
 
     def _getCryoCatAngleFile(self) -> str:
-        return self._getExtraPath(f'angles_{self.coneSampling.get():.0f}_c{self.rotSymDeg.get()}.txt')
+        return self._getExtraPath(f'angles_{self.coneSampling.get():.0f}_{self._getSymmetry()}.txt')
 
     def _getCryoCatWedgesFiles(self, tsId: str) -> str:
         return join(self._getCurrentTomoDir(tsId), 'wedges.star')
@@ -353,8 +394,8 @@ drop_nan_columns=True
     def _getWorkingTsIdFile(self, tsId: str, ext: str) -> str:
         return join(self._getCurrentTomoDir(tsId), tsId + ext)
 
-    def _genConvertedOrLinkedRefName(self, mask: Volume) -> str:
-        return self._getExtraPath(removeBaseExt(mask.getFileName()) + MRC)
+    def _genConvertedOrLinkedRefName(self, baseName: str) -> str:
+        return self._getExtraPath(baseName + MRC)
 
     def _convertOrLinkVolume(self, inVolume: Volume, outVolume: str) -> None:
         """Converts a volume into a compatible MRC file or links it if already compatible"""
@@ -367,6 +408,12 @@ drop_nan_columns=True
 
     def _genTmParamFileName(self, tsId: str) -> str:
         return join(self._getCurrentTomoDir(tsId), 'tm_params.star')
+
+    def _getResultsFile(self, tsId: str, fileName: str, ext: str=EM) -> str:
+        return join(self._getCurrentTomoDir(tsId), RESULTS_DIR, fileName + ext)
+
+    def _getSymmetry(self):
+        return f'C{self.rotSymDeg.get()}'
 
     @staticmethod
     def _fixWedgesFile(wedgesStarFile):
@@ -391,18 +438,18 @@ drop_nan_columns=True
         with open(self._genTmParamFileName(tsId), 'w') as f:
             paramList = [
                 self._getCurrentTomoDir(tsId) + '/',  # rootdir
-                'results/',  # outputdir
-                MRC, # vol_ext
+                RESULTS_DIR + '/',  # outputdir
+                EM, # vol_ext
                 basename(self._getWorkingTsIdFile(tsId, MRC)),  # tomo_name
                 tomoObjId, # tomo_num,
                 basename(self._getCryoCatWedgesFiles(tsId)),  # wedgelist_name
                 join('..', basename(self.refName)),  # template_name
                 join('..', basename(self.maskName)),  # tomo_mask_name
-                f'C{self.rotSymDeg.get()}',  # symmetry
+                f'{self._getSymmetry()}',  # symmetry
                 'zxz',  # angslist_order
                 join('..', basename(self._getCryoCatAngleFile())),  # anglist_name
-                'scores',  # smap_name
-                'angles',  # omap_name
+                SCORES,  # smap_name
+                ANGLES,  # omap_name
                 self.lowPassFilter.get(),  # lp_rad
                 self.highPassFilter.get(),  # hp_rad
                 self.currentBin.get(),  # tomogram_binning
