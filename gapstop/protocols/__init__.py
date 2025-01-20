@@ -24,4 +24,5 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
+from gapstop.protocols.protocol_extract_coordinates import ProtGapStopExtractCoords
 from gapstop.protocols.protocol_gapstop_tm import ProtGapStopTemplateMatching

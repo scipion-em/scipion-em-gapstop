@@ -38,3 +38,40 @@ GAPSTOP_ENV_NAME = f'{GAPSTOP}-{GAPSTOP_DEFAULT_VERSION}'
 GAPSTOP_ENV_ACTIVATION = 'GAPSTOP_ENV_ACTIVATION'
 GAPSTOP_DEFAULT_ACTIVATION_CMD = 'conda activate %s' % GAPSTOP_ENV_NAME
 GAPSTOP_CUDA_LIB = 'GAPSTOP_CUDA_LIB'
+
+# Inputs
+IN_TOMOS = 'inTomos'
+IN_CTF_SET = 'inCtfSet'
+IN_TS_SET = 'inTsSet'
+REF_VOL = 'reference'
+IN_MASK = 'mask'
+IN_SCORE_TOMOS = 'inScoreTomos'
+# Files and extensions
+MRC = '.mrc'
+EM = '.em'
+TLT = '.tlt'
+NPY = '.npy'
+# tm_param.star columns
+ROOTDIR = "rootdir"
+OUTPUTDIR = "outputdir"
+VOL_EXT = "vol_ext"
+TOMO_NAME = "tomo_name"
+TOMO_NUM = "tomo_num"
+WEDGELIST_NAME = "wedgelist_name"
+TMPL_NAME = "tmpl_name"
+MASK_NAME = "mask_name"
+SYMMETRY = "symmetry"
+ANGLIST_ORDER = "anglist_order"
+ANGLIST_NAME = "anglist_name"
+SMAP_NAME = "smap_name"
+OMAP_NAME = "omap_name"
+LP_RAD = "lp_rad"
+HP_RAD = "hp_rad"
+BINNING = "binning"
+TILING = "tiling"
+#  Other params
+RESULTS_DIR = 'results'
+SCORES = 'scores'
+ANGLES = 'angles'
+PARTICLE_LIST_FILE = 'particleList'
+PARTICLES_DATA_FILE = 'particlesData'
