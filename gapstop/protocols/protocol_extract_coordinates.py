@@ -123,7 +123,7 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
 from cryocat import tmana        
 
 tmana.scores_extract_particles(
-scores_map='{sTomo.getFileName()}',
+scores_map='{sTomo.getScoresMap()}',
 angles_map='{sTomo.getAnglesMap()}',
 angles_list='{sTomo.getAngleList()}',
 tomo_id={sTomo.getTomoNum()},

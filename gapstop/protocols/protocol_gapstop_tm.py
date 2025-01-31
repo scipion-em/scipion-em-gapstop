@@ -28,6 +28,8 @@ import logging
 from enum import Enum
 from os.path import abspath, join, basename
 from typing import Union, List
+
+import mrcfile
 import numpy as np
 from emtable import Table
 from gapstop import Plugin
@@ -38,10 +40,11 @@ from pwem.emlib.image import ImageHandler
 from pwem.objects import VolumeMask, Volume
 from pyworkflow import BETA
 from pyworkflow.object import Set
-from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST
+from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, BooleanParam, \
+    LEVEL_ADVANCED
 from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr
 from scipion.constants import PYTHON
-from tomo.objects import SetOfTiltSeries, CTFTomo
+from tomo.objects import SetOfTiltSeries, CTFTomo, SubTomogram
 from tomo.utils import getObjFromRelation
 
 logger = logging.getLogger(__name__)
@@ -89,14 +92,23 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
         form.addParam(IN_TS_SET, PointerParam,
                       pointerClass='SetOfTiltSeries',
                       allowsNull=True,
-                      important=True,
+                      expertLevel=LEVEL_ADVANCED,
                       label='Tilt-series (opt.)',
                       help='Used to get the tilt angles. If empty, the protocol will try to reach, via relations, '
-                           'the tilt-series associated to the introduced tomograms.')
+                           'the tilt-series associated to the introduced CTFs.')
         form.addParam(REF_VOL, PointerParam,
                       pointerClass='Volume, SubTomogram',
                       important=True,
                       label="Reference volume")
+        form.addParam('doInvertRefContrast', BooleanParam,
+                      default=False,
+                      label='Invert reference contrast?',
+                      important=True,
+                      help='The contrast of the template has to be the same as of the tomogram. If the '
+                           'tomogram has features in black (which is typically for cryoET) then the template '
+                           'has to have the same representation. For example, Relion outputs inverted '
+                           'contrast (features are white) and such maps have to be inverted prior running '
+                           'the GapStop_TM.')
         form.addParam(IN_MASK, PointerParam,
                       pointerClass=VolumeMask,
                       important=True,
@@ -115,26 +127,26 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
         form.addParam('nTiles', IntParam,
                       default=1,
                       label='No. tiles to decompose the tomogram')
-        group = form.addGroup('Angular sampling')
-        group.addParam('coneAngle', FloatParam,
+        form.addSection(label='Angular sampling')
+        form.addParam('coneAngle', FloatParam,
                        default=360,
                        label='Cone angle (deg.)')
-        group.addParam('coneSampling', FloatParam,
+        form.addParam('coneSampling', FloatParam,
                        default=10,
                        label='Cone sampling (deg.)')
-        group.addParam('rotSymDeg', IntParam,
+        form.addParam('rotSymDeg', IntParam,
                        default='1',
                        label='Degree of rotational symmetry',
                        help='From 1, 2, ... to N, representing symmetries C1, C2, ... to CN, respectively. In case '
                             'of non-rotational symmetry, set it ti 1 (default).')
-        group = form.addGroup('Template filtering')
-        group.addParam('lowPassFilter', FloatParam,
+        form.addSection(label='Template filtering')
+        form.addParam('lowPassFilter', FloatParam,
                        default=20,
                        label='Low-pass filter radius in Fourier px.',
                        help='To compute this value from the desired resolution, use following formula: '
                             'round(template_box_size * pixel_size / resolution) where template_box_size '
                             'is one dimension of the template.')
-        group.addParam('highPassFilter', FloatParam,
+        form.addParam('highPassFilter', FloatParam,
                        default=1,
                        label='High-pass filter radius in Fourier px.',
                        help='In most cases the optimal value is 1 (i.e. no high-pass filter). To compute '
@@ -207,7 +219,10 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
     def convertReferenceStep(self):
         # Convert or link the reference
         ref = self._getFormAttrib(REF_VOL)
-        self._convertOrLinkVolume(ref, self.refName)
+        if self.doInvertRefContrast.get():
+            self._invertReference(ref)
+        else:
+            self._convertOrLinkVolume(ref, self.refName)
         # Convert or link the mask
         mask = self._getFormAttrib(IN_MASK)
         self._convertOrLinkVolume(mask, self.maskName)
@@ -308,6 +323,7 @@ drop_nan_columns=True)
     def createOutputStep(self, tsId: str):
         with self._lock:
             tomo = self.tomoDict[tsId]
+            convertedOrLinkedTomoFile = self._getWorkingTsIdFile(tsId, MRC)
             tomoNum = tomo.getObjId()
             scoreTomoSet = self.createOutputSet()
             # Create the corresponding scoreTomo
@@ -316,7 +332,8 @@ drop_nan_columns=True)
             anglesMap = self._getResultsFile(tsId, self._getResultsBName(ANGLES, tomoNum))
             anglesList = self._getCryoCatAngleFile()
             scoreTomo.setTsId(tsId)
-            scoreTomo.setFileName(scoresMap)
+            scoreTomo.setFileName(convertedOrLinkedTomoFile)
+            scoreTomo.setScoresMap(scoresMap)
             scoreTomo.setAnglesMap(anglesMap)
             scoreTomo.setAnglesList(anglesList)
             scoreTomo.setTomoNum(tomoNum)
@@ -345,7 +362,7 @@ drop_nan_columns=True)
         return scoreTomoSet
 
     def _getTsFromRelations(self) -> Union[SetOfTiltSeries, None]:
-        inTomos = self._getFormAttrib(IN_TOMOS)
+        inTomos = self._getFormAttrib(IN_CTF_SET)
         return getObjFromRelation(inTomos, self, SetOfTiltSeries)
 
     def _getCryoCatAngleFile(self) -> str:
@@ -372,7 +389,7 @@ drop_nan_columns=True)
     def _genTmParamFileName(self, tsId: str) -> str:
         return join(self._getCurrentTomoDir(tsId), 'tm_params.star')
 
-    def _getResultsFile(self, tsId: str, fileName: str, ext: str=EM) -> str:
+    def _getResultsFile(self, tsId: str, fileName: str, ext: str=MRC) -> str:
         return join(self._getCurrentTomoDir(tsId), RESULTS_DIR, fileName + ext)
 
     @staticmethod
@@ -407,7 +424,7 @@ drop_nan_columns=True)
             paramList = [
                 self._getCurrentTomoDir(tsId) + '/',  # rootdir
                 RESULTS_DIR + '/',  # outputdir
-                EM, # vol_ext
+                MRC, # vol_ext
                 basename(self._getWorkingTsIdFile(tsId, MRC)),  # tomo_name
                 tomoObjId, # tomo_num,
                 basename(self._getCryoCatWedgesFiles(tsId)),  # wedgelist_name
@@ -425,6 +442,15 @@ drop_nan_columns=True)
             ]
             paramTable.addRow(*paramList)
             paramTable.writeStar(f, tableName=tsId)
+
+    def _invertReference(self, ref: Union[Volume, SubTomogram]):
+        logger.info(cyanStr("Inverting the reference contrast"))
+        with mrcfile.open(ref.getFileName()) as origRef:
+            origData = origRef.data
+            with mrcfile.new(self.refName) as invertedRef:
+                invertedRef.set_data(-1 * origData)
+                invertedRef.voxel_size = ref.getSamplingRate()
+
 
     @staticmethod
     def _getTmParamStarFields():
