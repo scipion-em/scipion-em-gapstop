@@ -27,7 +27,7 @@
 from os.path import join
 from typing import Union
 
-from gapstop.objects import SetOfScoreTomograms
+from gapstop.objects import SetOfGapStopScoreTomograms
 from gapstop.constants import *
 from pwem.objects import Volume
 from pwem.protocols import EMProtocol
@@ -42,7 +42,7 @@ class ProtGapStopBase(EMProtocol):
 
     # --------------------------- UTILS functions -----------------------------
     def _getFormAttrib(self, attribName: str, returnPointer: bool = False) -> Union[SetOfTiltSeries,
-    SetOfTomograms, SetOfCTFTomoSeries, Volume, Pointer, SetOfScoreTomograms, None]:
+    SetOfTomograms, SetOfCTFTomoSeries, Volume, Pointer, SetOfGapStopScoreTomograms, None]:
         inTsPointer = getattr(self, attribName, None)
         if not inTsPointer:
             return None

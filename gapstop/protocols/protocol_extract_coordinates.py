@@ -33,13 +33,14 @@ from gapstop import Plugin
 from gapstop.constants import *
 from gapstop.protocols.protocol_base import ProtGapStopBase
 from pwem.convert import transformations
-from pyworkflow import BETA, validColor
+from pyworkflow import BETA
 from pyworkflow.object import Set
 from pyworkflow.protocol import PointerParam, IntParam, FloatParam, LEVEL_ADVANCED, GT, STEPS_PARALLEL
 from pyworkflow.utils import Message, makePath
 from scipion.constants import PYTHON
 from tomo.constants import BOTTOM_LEFT_CORNER
-from tomo.objects import SetOfCoordinates3D, Tomogram, Coordinate3D
+from tomo.objects import SetOfCoordinates3D, Tomogram, Coordinate3D, SetOfTomograms
+from tomo.utils import getObjFromRelation
 
 
 class gsExtractCoordsOutputs(Enum):
@@ -49,7 +50,7 @@ class gsExtractCoordsOutputs(Enum):
 class ProtGapStopExtractCoords(ProtGapStopBase):
     """Extracts coordinates from scores maps produced by template matching with GAPSTOP(TM)."""
 
-    _label = 'extract coordinates from score tomograms'
+    _label = 'extract coordinates'
     _devStatus = BETA
     _possibleOutputs = gsExtractCoordsOutputs
     stepsExecutionMode = STEPS_PARALLEL
@@ -63,7 +64,7 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
     def _defineParams(self, form):
         form.addSection(label=Message.LABEL_INPUT)
         form.addParam(IN_SCORE_TOMOS, PointerParam,
-                      pointerClass='SetOfScoreTomograms',
+                      pointerClass='SetOfGapStopScoreTomograms',
                       important=True,
                       label='Score tomograms',
                       help='They are the result of the gapstop template matching.')
@@ -84,10 +85,14 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
         form.addParam('scoresThreshold', FloatParam,
                       default=0.1,
                       validators=[GT(0)],
-                      label='Particle diameter (px)', )
+                      label='Score threshold',
+                      help='"Direct" threshold for the scores map. If set, all values below this threshold '
+                           'will be removed from the scores map. This parameter is useful if one knows exact '
+                           'threshold for the scores map.')
         form.addParam('boxSize', IntParam,
                       default=20,
                       validators=[GT(0)],
+                      expertLevel=LEVEL_ADVANCED,
                       label='Box size (px)',
                       help='Required for coordinates visualization by some visualization tools, such as Eman viewer.')
         form.addParallelSection(threads=1, mpi=0)
@@ -112,7 +117,7 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
     def _initialize(self):
         scoreTomoSet = self._getFormAttrib(IN_SCORE_TOMOS)
         self.scoreTomoDict = {sTomo.getTsId(): sTomo.clone() for sTomo in scoreTomoSet.iterItems()}
-        self.tomoSet = scoreTomoSet.getPrecedents()
+        self.tomoSet = self._getTomosFromRelations()
 
     def extractCoordinatesStep(self, tsId: str):
         sTomo = self.scoreTomoDict[tsId]
@@ -123,7 +128,7 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
 from cryocat import tmana        
 
 tmana.scores_extract_particles(
-scores_map='{sTomo.getScoresMap()}',
+scores_map='{sTomo.getFileName()}',
 angles_map='{sTomo.getAnglesMap()}',
 angles_list='{sTomo.getAngleList()}',
 tomo_id={sTomo.getTomoNum()},
@@ -166,7 +171,7 @@ angles_numbering=0)
             inScoreTomosPointer = self._getFormAttrib(IN_SCORE_TOMOS, returnPointer=True)
             inScoreTomos = inScoreTomosPointer.get()
             outCoords = SetOfCoordinates3D.create(self._getPath(), template="coordinates%s")
-            outCoords.setPrecedents(inScoreTomos)
+            outCoords.setPrecedents(self.tomoSet)
             outCoords.setSamplingRate(inScoreTomos.getSamplingRate())
             outCoords.setBoxSize(self.boxSize.get())
             outCoords.setStreamState(Set.STREAM_OPEN)
@@ -175,6 +180,10 @@ angles_numbering=0)
             self._defineSourceRelation(inScoreTomosPointer, outCoords)
 
         return outCoords
+
+    def _getTomosFromRelations(self) -> SetOfTomograms:
+        inScoreTomos = self._getFormAttrib(IN_SCORE_TOMOS)
+        return getObjFromRelation(inScoreTomos, self, SetOfTomograms)
 
     def _loadParticleList(self, tsId: str) -> str:
         """The particle list is encoded in a .em file. Thus, it will be loaded and decoded. The data represented
