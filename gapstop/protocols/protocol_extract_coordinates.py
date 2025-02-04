@@ -68,13 +68,14 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
                       important=True,
                       label='Score tomograms',
                       help='They are the result of the gapstop template matching.')
-        form.addParam('numberOfCoords', IntParam,
-                      default=500,
+        form.addParam('scoresThreshold', FloatParam,
+                      default=0.1,
                       important=True,
-                      label='Max no. coordinates',
-                      help='If set to -1, all the coordinates resulting after having applied the particle diameter '
-                           'and the score threshold will be saved. Any other case, the first N coordinates, sorted '
-                           'by score, will be saved.')
+                      validators=[GT(0)],
+                      label='Score threshold',
+                      help='"Direct" threshold for the scores map. If set, all values below this threshold '
+                           'will be removed from the scores map. This parameter is useful if one knows exact '
+                           'threshold for the scores map.')
         form.addParam('partDiameter', FloatParam,
                       default=10,
                       validators=[GT(0)],
@@ -82,13 +83,12 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
                       help='"Direct" threshold for the scores map. If set, all values below this '
                            'threshold will be removed from the scores map. This parameter is useful '
                            'if one knows exact threshold for the scores map.')
-        form.addParam('scoresThreshold', FloatParam,
-                      default=0.1,
-                      validators=[GT(0)],
-                      label='Score threshold',
-                      help='"Direct" threshold for the scores map. If set, all values below this threshold '
-                           'will be removed from the scores map. This parameter is useful if one knows exact '
-                           'threshold for the scores map.')
+        form.addParam('numberOfCoords', IntParam,
+                      default=500,
+                      label='Max no. coordinates',
+                      help='If set to -1, all the coordinates resulting after having applied the particle diameter '
+                           'and the score threshold will be saved. Any other case, the first N coordinates, sorted '
+                           'by score, will be saved.')
         form.addParam('boxSize', IntParam,
                       default=20,
                       validators=[GT(0)],

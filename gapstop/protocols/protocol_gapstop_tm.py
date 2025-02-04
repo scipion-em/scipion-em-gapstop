@@ -38,7 +38,7 @@ from gapstop.protocols.protocol_base import ProtGapStopBase
 from pwem.emlib.image import ImageHandler
 from pwem.objects import VolumeMask, Volume
 from pyworkflow import BETA
-from pyworkflow.object import Set
+from pyworkflow.object import Set, String
 from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, BooleanParam, \
     LEVEL_ADVANCED
 from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr
@@ -76,6 +76,8 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
         self.refName = None
         self.maskName = None
         self.ih = ImageHandler()
+        self.failedTsIds = []
+        self.failedTsIdsStr = String()
 
     # --------------------------- DEFINE param functions ----------------------
     def _defineParams(self, form):
@@ -102,7 +104,7 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
                        important=True,
                        label="Reference volume")
         group.addParam('doInvertRefContrast', BooleanParam,
-                       default=False,
+                       default=True,
                        label='Invert contrast?',
                        important=True,
                        help='The contrast of the template has to be the same as of the tomogram. If the '
@@ -158,7 +160,8 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
                            'is one dimension of the template.')
         form.addHidden(GPU_LIST, StringParam,
                        default='0',
-                       label="Choose GPU IDs")
+                       label="Choose GPU IDs",
+                       help='GPU device/s to be used.')
         form.addParallelSection(threads=1, mpi=0)
 
     # --------------------------- INSERT steps functions ----------------------
@@ -182,7 +185,7 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
                                               prerequisites=tmId,
                                               needsGPU=False)
             closeSetStepDeps.append(cOutId)
-        self._insertFunctionStep(self._closeOutputSet,
+        self._insertFunctionStep(self.closeOutputSetStep,
                                  prerequisites=closeSetStepDeps,
                                  needsGPU=False)
 
@@ -247,43 +250,44 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
         Plugin.runGapStop(self, PYTHON, genAnglesPythonFile, isCryoCatExec=True)
 
     def convertInputStep(self, tsId: str):
-        tomo = self.tomoDict[tsId]
-        ts = self.tsDict[tsId]
-        ctf = self.ctfDict[tsId]
-        acq = ts.getAcquisition()
-        tomoObjId = tomo.getObjId()
-        tsDir = self._getCurrentTomoDir(tsId)
-        makePath(tsDir)
+        try:
+            tomo = self.tomoDict[tsId]
+            ts = self.tsDict[tsId]
+            ctf = self.ctfDict[tsId]
+            acq = ts.getAcquisition()
+            tomoObjId = tomo.getObjId()
+            tsDir = self._getCurrentTomoDir(tsId)
+            makePath(tsDir)
 
-        # Convert or link the current tomogram
-        logger.info(cyanStr(f'tsId: {tsId}: converting or linking the tomogram...'))
-        inTomoName = self._getWorkingTsIdFile(tsId, MRC)
-        self._convertOrLinkVolume(tomo, inTomoName)
+            # Convert or link the current tomogram
+            logger.info(cyanStr(f'tsId: {tsId}: converting or linking the tomogram...'))
+            inTomoName = self._getWorkingTsIdFile(tsId, MRC)
+            self._convertOrLinkVolume(tomo, inTomoName)
 
-        #  Defocus info:
-        # "defocus1", "defocus2", "astigmatism", "phase_shift", "defocus_mean"
-        logger.info(cyanStr(f'tsId: {tsId}: generating the wedge list file...'))
-        nImgs = len(ctf)
-        defocusData = np.zeros((nImgs, 5))
-        for i, ctfTomo in enumerate(ctf.iterItems(orderBy=[CTFTomo.INDEX_FIELD], direction='ASC')):
-            defocusData[i, 0] = ctfTomo.getDefocusU()
-            defocusData[i, 1] = ctfTomo.getDefocusV()
-            defocusData[i, 2] = ctfTomo.getDefocusAngle()
-            defocusData[i, 4] = (ctfTomo.getDefocusU() + ctfTomo.getDefocusV()) / 2
+            #  Defocus info:
+            # "defocus1", "defocus2", "astigmatism", "phase_shift", "defocus_mean"
+            logger.info(cyanStr(f'tsId: {tsId}: generating the wedge list file...'))
+            nImgs = len(ctf)
+            defocusData = np.zeros((nImgs, 5))
+            for i, ctfTomo in enumerate(ctf.iterItems(orderBy=[CTFTomo.INDEX_FIELD], direction='ASC')):
+                defocusData[i, 0] = ctfTomo.getDefocusU()
+                defocusData[i, 1] = ctfTomo.getDefocusV()
+                defocusData[i, 2] = ctfTomo.getDefocusAngle()
+                defocusData[i, 4] = (ctfTomo.getDefocusU() + ctfTomo.getDefocusV()) / 2
 
-        # Tilt angles and dose
-        inTltName = self._getWorkingTsIdFile(tsId, TLT)
-        ts.generateTltFile(inTltName, includeDose=True)
-        tltDoseData = np.loadtxt(inTltName)
-        tltData = tltDoseData[:, 0]
-        doseData = tltDoseData[:, 1]
+            # Tilt angles and dose
+            inTltName = self._getWorkingTsIdFile(tsId, TLT)
+            ts.generateTltFile(inTltName, includeDose=True)
+            tltDoseData = np.loadtxt(inTltName)
+            tltData = tltDoseData[:, 0]
+            doseData = tltDoseData[:, 1]
 
-        # Create the wedge list
-        wedgesStarFile = self._getCryoCatWedgesFiles(tsId)
-        binfactor = self.tomosBinning
-        unBinnedtomoDims = np.array(tomo.getDimensions()) * binfactor
-        unbinnedApix = self.tomosSRate * binfactor
-        codePatch = f"""
+            # Create the wedge list
+            wedgesStarFile = self._getCryoCatWedgesFiles(tsId)
+            binfactor = self.tomosBinning
+            unBinnedtomoDims = np.array(tomo.getDimensions()) * binfactor
+            unbinnedApix = self.tomosSRate * binfactor
+            codePatch = f"""
 from cryocat import wedgeutils
 import numpy as np
 
@@ -306,45 +310,64 @@ cs={acq.getSphericalAberration()},
 output_file='{wedgesStarFile}',
 drop_nan_columns=True)
 """
-        genWedgesPythonFile = join(self._getCurrentTomoDir(tsId), 'genWedgesList.py')
-        with open(genWedgesPythonFile, "w") as pyFile:
-            pyFile.write(codePatch)
-        Plugin.runGapStop(self, PYTHON, genWedgesPythonFile, isCryoCatExec=True)
-        self._fixWedgesFile(wedgesStarFile)
+            genWedgesPythonFile = join(self._getCurrentTomoDir(tsId), 'genWedgesList.py')
+            with open(genWedgesPythonFile, "w") as pyFile:
+                pyFile.write(codePatch)
+            Plugin.runGapStop(self, PYTHON, genWedgesPythonFile, isCryoCatExec=True)
+            self._fixWedgesFile(wedgesStarFile)
 
-        # Generate the tm_params.star
-        logger.info(cyanStr(f'tsId: {tsId}: generating the tm_params.star file...'))
-        self._createTmParamsFile(tsId, tomoObjId)
+            # Generate the tm_params.star
+            logger.info(cyanStr(f'tsId: {tsId}: generating the tm_params.star file...'))
+            self._createTmParamsFile(tsId, tomoObjId)
+        except:
+            self.failedTsIds.append(tsId)
 
     def templateMatchingStep(self, tsId: str):
-        logger.info(cyanStr(f'===> tsId = {tsId}: performing the template matching...'))
-        args = 'run_tm '
-        args += f'-n {self.nTiles.get()} '
-        args += f'{self._genTmParamFileName(tsId)}'
-        Plugin.runGapStop(self, self.program, args)
+        if tsId not in self.failedTsIds:
+            try:
+                logger.info(cyanStr(f'===> tsId = {tsId}: performing the template matching...'))
+                args = 'run_tm '
+                args += f'-n {self.nTiles.get()} '
+                args += f'{self._genTmParamFileName(tsId)}'
+                Plugin.runGapStop(self, self.program, args)
+            except:
+                self.failedTsIds.append(tsId)
 
     def createOutputStep(self, tsId: str):
-        with self._lock:
-            tomo = self.tomoDict[tsId]
-            convertedOrLinkedTomoFile = self._getWorkingTsIdFile(tsId, MRC)
-            tomoNum = tomo.getObjId()
-            scoreTomoSet = self.createOutputSet()
-            # Create the corresponding scoreTomo
-            scoreTomo = GapStopScoreTomogram()
-            scoresMap = self._getResultsFile(tsId, self._getResultsBName(SCORES, tomoNum))
-            anglesMap = self._getResultsFile(tsId, self._getResultsBName(ANGLES, tomoNum))
-            anglesList = self._getCryoCatAngleFile()
-            scoreTomo.setTsId(tsId)
-            scoreTomo.setFileName(scoresMap)
-            scoreTomo.setTomoFile(convertedOrLinkedTomoFile)
-            scoreTomo.setAnglesMap(anglesMap)
-            scoreTomo.setAnglesList(anglesList)
-            scoreTomo.setTomoNum(tomoNum)
-            scoreTomo.setSymmetry(self._getSymmetry())
-            # Append to the set and store
-            scoreTomoSet.append(scoreTomo)
-            scoreTomoSet.write()
-            self._store(scoreTomoSet)
+        if tsId not in self.failedTsIds:
+            with self._lock:
+                tomo = self.tomoDict[tsId]
+                convertedOrLinkedTomoFile = self._getWorkingTsIdFile(tsId, MRC)
+                tomoNum = tomo.getObjId()
+                scoreTomoSet = self.createOutputSet()
+                # Create the corresponding scoreTomo
+                scoreTomo = GapStopScoreTomogram()
+                scoresMap = self._getResultsFile(tsId, self._getResultsBName(SCORES, tomoNum))
+                anglesMap = self._getResultsFile(tsId, self._getResultsBName(ANGLES, tomoNum))
+                anglesList = self._getCryoCatAngleFile()
+                scoreTomo.setTsId(tsId)
+                scoreTomo.setFileName(scoresMap)
+                scoreTomo.setTomoFile(convertedOrLinkedTomoFile)
+                scoreTomo.setAnglesMap(anglesMap)
+                scoreTomo.setAnglesList(anglesList)
+                scoreTomo.setTomoNum(tomoNum)
+                scoreTomo.setSymmetry(self._getSymmetry())
+                # Append to the set and store
+                scoreTomoSet.append(scoreTomo)
+                scoreTomoSet.write()
+                self._store(scoreTomoSet)
+
+    def closeOutputSetStep(self):
+        scoreTomoSet = getattr(self, self._possibleOutputs.scoreTomogrmas.name, None)
+        if scoreTomoSet:
+            self._closeOutputSet()
+        else:
+            raise Exception('No gapStopTM scored tomograms were generated. Maybe the tomograms are too large '
+                            'for the GPU/s used. Consider to bin them before and/or introduce a higher number in '
+                            'the parameter "No. tiles to descompose the tomogram".')
+        if self.failedTsIds:
+            self.failedTsIdsStr.set(str(self.failedTsIds))
+            self._store(self.failedTsIdsStr)
 
     # --------------------------- UTILS functions -----------------------------
     def createOutputSet(self):
@@ -505,5 +528,8 @@ drop_nan_columns=True)
         if self.isFinished():
             msg.append('*GapStop_TM is composed of 2 steps*. To extract the coordinates from the scored '
                        'tomograms calculated, call the protocol *gapstop - extract coordinates*.')
+            failedStrs = self.failedTsIdsStr.get()
+            if failedStrs:
+                msg.append(f'The following tsIds were not possible to be processed: *{failedStrs}*')
         return msg
 
