@@ -27,6 +27,7 @@
 from enum import Enum
 from os.path import join
 
+import mrcfile
 import numpy as np
 
 from gapstop import Plugin
@@ -35,7 +36,7 @@ from gapstop.protocols.protocol_base import ProtGapStopBase
 from pwem.convert import transformations
 from pyworkflow import BETA
 from pyworkflow.object import Set
-from pyworkflow.protocol import PointerParam, IntParam, FloatParam, LEVEL_ADVANCED, GT, STEPS_PARALLEL
+from pyworkflow.protocol import PointerParam, IntParam, FloatParam, LEVEL_ADVANCED, GT, STEPS_PARALLEL, LE, GE
 from pyworkflow.utils import Message, makePath
 from scipion.constants import PYTHON
 from tomo.constants import BOTTOM_LEFT_CORNER
@@ -68,24 +69,43 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
                       important=True,
                       label='Score tomograms',
                       help='They are the result of the gapstop template matching.')
-        form.addParam('scoresThreshold', FloatParam,
-                      default=0.1,
-                      important=True,
-                      validators=[GT(0)],
-                      label='Score threshold',
-                      help='"Direct" threshold for the scores map. If set, all values below this threshold '
-                           'will be removed from the scores map. This parameter is useful if one knows exact '
-                           'threshold for the scores map.')
+        # form.addParam('scoresThreshold', FloatParam,
+        #               default=0.1,
+        #               validators=[GT(0)],
+        #               label='Score threshold',
+        #               help='"Direct" threshold for the scores map. If set, all values below this threshold '
+        #                    'will be removed from the scores map. This parameter is useful if one knows exact '
+        #                    'threshold for the scores map.')
         form.addParam('partDiameter', FloatParam,
                       default=10,
+                      important=True,
                       validators=[GT(0)],
                       label='Particle diameter (px)',
-                      help='"Direct" threshold for the scores map. If set, all values below this '
-                           'threshold will be removed from the scores map. This parameter is useful '
-                           'if one knows exact threshold for the scores map.')
+                      help='Diameter of the particle to be used for extraction and clustering.\n\n'
+                           'In this context, it has more correspondence with a mathematical '
+                           'representation than with the exact physical diameter of the particle. '
+                           'It is a way to establish a distance criterion for the search and clustering '
+                           'of points in the correlation map. In a tomogram, particles may not be '
+                           'perfectly spherical, and their diameters may vary. By using a value for '
+                           'the "particle diameter," you are defining a distance threshold that is '
+                           'useful for identifying and grouping points that are likely to belong to '
+                           'the same particle or structure in the score map.\n\n'
+                           'In some contexts, the density of points in the score map may vary. '
+                           'A smaller diameter can reduce noise by focusing on more compact groups, '
+                           'while in other cases, a larger diameter may be necessary to cluster '
+                           'larger and more spaced-out particles.')
+        form.addParam('percentile', FloatParam,
+                      default=99.5,
+                      expertLevel=LEVEL_ADVANCED,
+                      validators=[GE(0), LE(100)],
+                      label='Percentile value',
+                      help='Percentile value [in range [0, 100] of the GapStopScoreTomograms that will be used '
+                           'to determine the best candidates to be particles. If a max. number of coordinates '
+                           'per tomogram is provided, they will be the best N decending sorted by score. Normally, '
+                           'the recommended values are from 99.5 to 99.9.')
         form.addParam('numberOfCoords', IntParam,
                       default=500,
-                      label='Max no. coordinates',
+                      label='Max no. coordinates per tomogram',
                       help='If set to -1, all the coordinates resulting after having applied the particle diameter '
                            'and the score threshold will be saved. Any other case, the first N coordinates, sorted '
                            'by score, will be saved.')
@@ -124,17 +144,19 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
         tsIdExtraDir = self._getCurrentTomoDir(tsId)
         makePath(tsIdExtraDir)
         outParticleListFile = self._getTsIdExtraDirFile(tsId, PARTICLE_LIST_FILE)
+        scoresMap = sTomo.getFileName()
+        # scores_threshold = {self.scoresThreshold.get()},
         codePatch = f"""
 from cryocat import tmana        
 
 tmana.scores_extract_particles(
-scores_map='{sTomo.getFileName()}',
+scores_map='{scoresMap}',
 angles_map='{sTomo.getAnglesMap()}',
 angles_list='{sTomo.getAngleList()}',
 tomo_id={sTomo.getTomoNum()},
 particle_diameter={self.partDiameter.get()},
 object_id=None,
-scores_threshold={self.scoresThreshold.get()},
+scores_threshold={self._getScorePercentileValue(scoresMap)},
 sigma_threshold=None,
 cluster_size=None,
 n_particles=None,
@@ -185,6 +207,13 @@ angles_numbering=0)
         inScoreTomos = self._getFormAttrib(IN_SCORE_TOMOS)
         return getObjFromRelation(inScoreTomos, self, SetOfTomograms)
 
+    def _getScorePercentileValue(self, tomoFileName: str) -> float:
+        with mrcfile.mmap(tomoFileName) as mrc:
+            data = mrc.data
+            percentileVal = np.percentile(data, self.percentile.get())
+            return percentileVal
+
+
     def _loadParticleList(self, tsId: str) -> str:
         """The particle list is encoded in a .em file. Thus, it will be loaded and decoded. The data represented
         on each column is explained in https://cryocat.readthedocs.io/latest/user_guide/motl_basics.html"""
@@ -198,14 +227,12 @@ import numpy as np
 _, data = emfile.read('{particlesEmFile}')
 # Use numpy.squeeze() to remove dimensions of size 1 
 data = np.squeeze(data)
-# Sort by score (first Column)
-sorted_data = data[data[:, 0].argsort()]
-# Save the first N particles
-if {maxNumCoords} > -1 and sorted_data.shape[0] > {maxNumCoords}:
-    sorted_data = sorted_data[0:{maxNumCoords}, :]
-np.save('{outParticlesNpyFile}', sorted_data)
+# Save the first N particles, knowing that they are sorted descending by score
+if {maxNumCoords} > -1 and data.shape[0] > {maxNumCoords}:
+    data = data[0:{maxNumCoords}, :]
+np.save('{outParticlesNpyFile}', data)
         """
-        readEmParticlePythonFile = self._getExtraPath('readEmParticles.py')
+        readEmParticlePythonFile = join(self._getCurrentTomoDir(tsId), 'readEmParticles.py')
         with open(readEmParticlePythonFile, "w") as pyFile:
             pyFile.write(codePatch)
         Plugin.runGapStop(self, PYTHON, readEmParticlePythonFile, isCryoCatExec=True)

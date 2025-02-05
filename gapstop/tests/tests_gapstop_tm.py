@@ -65,7 +65,7 @@ class TestGapStopTM(TestBaseCentralizedLayer):
         protImportTs = cls.newProtocol(ProtImportTs,
                                        filesPath=cls.ds.getFile(DataSetRe4STATuto.tsPath.value),
                                        filesPattern=DataSetRe4STATuto.tsPattern.value,
-                                       exclusionWords=DataSetRe4STATuto.exclusionWordsTs54.value,
+                                       exclusionWords=DataSetRe4STATuto.exclusionWordsTs03ts54.value,
                                        anglesFrom=2,  # From tlt file
                                        voltage=DataSetRe4STATuto.voltage.value,
                                        magnification=DataSetRe4STATuto.magnification.value,
@@ -148,7 +148,7 @@ class TestGapStopTM(TestBaseCentralizedLayer):
                                          mask=self.maskBin8,
                                          doInvertRefContrast=True,
                                          nTiles=8,
-                                         coneSampling=30,
+                                         coneSampling=20,
                                          rotSymDeg=6)
         self.launchProtocol(protGapStopTM)
         scoreTomos = getattr(protGapStopTM, protGapStopTM._possibleOutputs.scoreTomogrmas.name, None)
@@ -158,7 +158,8 @@ class TestGapStopTM(TestBaseCentralizedLayer):
         protGapStopExtract = self.newProtocol(ProtGapStopExtractCoords,
                                               inScoreTomos=scoreTomos,
                                               scoresThreshold=0.09,
-                                              partDiameter=1,
+                                              percentile=99.9,
+                                              partDiameter=10,
                                               numberOfCoords=-1)
         self.launchProtocol(protGapStopExtract)
         coords = getattr(protGapStopExtract, protGapStopExtract._possibleOutputs.coordinates.name, None)
