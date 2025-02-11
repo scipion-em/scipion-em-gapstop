@@ -49,7 +49,7 @@ from tomo.utils import getObjFromRelation
 logger = logging.getLogger(__name__)
 
 
-class gapStopOutputs(Enum):
+class GapStopTMOutputs(Enum):
     scoreTomogrmas = SetOfGapStopScoreTomograms
 
 
@@ -62,7 +62,7 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
 
     _label = 'template matching'
     _devStatus = BETA
-    _possibleOutputs = gapStopOutputs
+    _possibleOutputs = GapStopTMOutputs
     stepsExecutionMode = STEPS_PARALLEL
     program = 'gapstop'
 

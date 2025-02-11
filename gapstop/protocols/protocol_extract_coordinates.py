@@ -36,7 +36,7 @@ from gapstop.protocols.protocol_base import ProtGapStopBase
 from pwem.convert import transformations
 from pyworkflow import BETA
 from pyworkflow.object import Set
-from pyworkflow.protocol import PointerParam, IntParam, FloatParam, LEVEL_ADVANCED, GT, STEPS_PARALLEL, LE, GE
+from pyworkflow.protocol import PointerParam, IntParam, FloatParam, GT, STEPS_PARALLEL, LE, GE
 from pyworkflow.utils import Message, makePath
 from scipion.constants import PYTHON
 from tomo.constants import BOTTOM_LEFT_CORNER
@@ -44,7 +44,7 @@ from tomo.objects import SetOfCoordinates3D, Tomogram, Coordinate3D, SetOfTomogr
 from tomo.utils import getObjFromRelation
 
 
-class gsExtractCoordsOutputs(Enum):
+class GSExtractCoordsOutputs(Enum):
     coordinates = SetOfCoordinates3D
 
 
@@ -53,7 +53,7 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
 
     _label = 'extract coordinates'
     _devStatus = BETA
-    _possibleOutputs = gsExtractCoordsOutputs
+    _possibleOutputs = GSExtractCoordsOutputs
     stepsExecutionMode = STEPS_PARALLEL
 
     def __init__(self, **kwargs):
@@ -69,13 +69,6 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
                       important=True,
                       label='Score tomograms',
                       help='They are the result of the gapstop template matching.')
-        # form.addParam('scoresThreshold', FloatParam,
-        #               default=0.1,
-        #               validators=[GT(0)],
-        #               label='Score threshold',
-        #               help='"Direct" threshold for the scores map. If set, all values below this threshold '
-        #                    'will be removed from the scores map. This parameter is useful if one knows exact '
-        #                    'threshold for the scores map.')
         form.addParam('partDiameter', FloatParam,
                       default=10,
                       important=True,
@@ -96,25 +89,19 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
                            'larger and more spaced-out particles.')
         form.addParam('percentile', FloatParam,
                       default=99.5,
-                      expertLevel=LEVEL_ADVANCED,
+                      important=True,
                       validators=[GE(0), LE(100)],
                       label='Percentile value',
                       help='Percentile value [in range [0, 100] of the GapStopScoreTomograms that will be used '
                            'to determine the best candidates to be particles. If a max. number of coordinates '
                            'per tomogram is provided, they will be the best N decending sorted by score. Normally, '
-                           'the recommended values are from 99.5 to 99.9.')
+                           'the recommended values are from 99.5 to 99.99.')
         form.addParam('numberOfCoords', IntParam,
-                      default=500,
+                      default=-1,
                       label='Max no. coordinates per tomogram',
                       help='If set to -1, all the coordinates resulting after having applied the particle diameter '
                            'and the score threshold will be saved. Any other case, the first N coordinates, sorted '
                            'by score, will be saved.')
-        form.addParam('boxSize', IntParam,
-                      default=20,
-                      validators=[GT(0)],
-                      expertLevel=LEVEL_ADVANCED,
-                      label='Box size (px)',
-                      help='Required for coordinates visualization by some visualization tools, such as Eman viewer.')
         form.addParallelSection(threads=1, mpi=0)
 
     # --------------------------- INSERT steps functions ----------------------
@@ -195,7 +182,7 @@ angles_numbering=0)
             outCoords = SetOfCoordinates3D.create(self._getPath(), template="coordinates%s")
             outCoords.setPrecedents(self.tomoSet)
             outCoords.setSamplingRate(inScoreTomos.getSamplingRate())
-            outCoords.setBoxSize(self.boxSize.get())
+            outCoords.setBoxSize(self.partDiameter.get())
             outCoords.setStreamState(Set.STREAM_OPEN)
 
             self._defineOutputs(**{self._possibleOutputs.coordinates.name: outCoords})
