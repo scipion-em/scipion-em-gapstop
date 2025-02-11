@@ -24,6 +24,8 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
+from os.path import exists
+
 from xmipp3.protocols import XmippProtCropResizeVolumes, XmippProtCreateMask3D
 from gapstop.protocols import ProtGapStopTemplateMatching, ProtGapStopExtractCoords
 from pwem.protocols import ProtImportVolumes
@@ -40,6 +42,8 @@ class TestGapStopTM(TestBaseCentralizedLayer):
     unbinnedSRate = DataSetRe4STATuto.unbinnedPixSize.value
     binFactor4 = 4
     binFactor8 = 8
+    nTomos = 2
+    expectedTomoDims = [480, 464, 140]
 
     @classmethod
     def setUpClass(cls):
@@ -140,6 +144,7 @@ class TestGapStopTM(TestBaseCentralizedLayer):
 
     def testGapStopTM(self):
         print(magentaStr("\n==> Running the GapStop_TM:"))
+        sRateBin8 = self.unbinnedSRate * self.binFactor8
         protGapStopTM = self.newProtocol(ProtGapStopTemplateMatching,
                                          inTomos=self.tomoNoFidBin8,
                                          inCtfSet=self.importedCtfs,
@@ -152,15 +157,31 @@ class TestGapStopTM(TestBaseCentralizedLayer):
                                          rotSymDeg=6)
         self.launchProtocol(protGapStopTM)
         scoreTomos = getattr(protGapStopTM, protGapStopTM._possibleOutputs.scoreTomogrmas.name, None)
-        # TODO: add the checks
+        # Check the results of the gapStop_TM
+        self.checkTomograms(inTomoSet=scoreTomos,
+                            expectedSetSize=self.nTomos,
+                            expectedSRate=sRateBin8,
+                            expectedDimensions=self.expectedTomoDims)
+        # GapStopScoreTomogram specific attributes
+        for tomo in scoreTomos:
+            self.assertTrue(exists(tomo.getTomoFile()))
+            self.assertTrue(exists(tomo.getAnglesMap()))
+            self.assertTrue(exists(tomo.getAngleList()))
+            self.assertGreater(tomo.getTomoNum(), 0)
+            self.assertEqual(tomo.getSymmetry(), 'C6')
 
         print(magentaStr("\n==> GapStop_TM == > extracting the coordinates"))
+        particleDiameter = 10
         protGapStopExtract = self.newProtocol(ProtGapStopExtractCoords,
                                               inScoreTomos=scoreTomos,
                                               scoresThreshold=0.09,
                                               percentile=99.9,
-                                              partDiameter=10,
+                                              partDiameter=particleDiameter,
                                               numberOfCoords=-1)
         self.launchProtocol(protGapStopExtract)
         coords = getattr(protGapStopExtract, protGapStopExtract._possibleOutputs.coordinates.name, None)
-        # TODO: add the checks
+        # Check the results of gapStop's extraction
+        self.checkCoordinates(outCoords=coords,
+                              expectedBoxSize=particleDiameter,
+                              expectedSRate=sRateBin8)
+        # TODO: terminar esto
