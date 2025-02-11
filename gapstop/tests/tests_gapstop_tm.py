@@ -148,7 +148,7 @@ class TestGapStopTM(TestBaseCentralizedLayer):
                                          mask=self.maskBin8,
                                          doInvertRefContrast=True,
                                          nTiles=8,
-                                         coneSampling=20,
+                                         coneSampling=15,
                                          rotSymDeg=6)
         self.launchProtocol(protGapStopTM)
         scoreTomos = getattr(protGapStopTM, protGapStopTM._possibleOutputs.scoreTomogrmas.name, None)
