@@ -185,4 +185,4 @@ class TestGapStopTM(TestBaseCentralizedLayer):
                               expectedBoxSize=particleDiameter,
                               expectedSRate=sRateBin8,
                               orientedParticles=True)
-        self.assertTrue(coords.getSize > 2000)
+        self.assertTrue(coords.getSize() > 2000)
