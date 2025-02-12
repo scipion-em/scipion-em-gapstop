@@ -49,7 +49,7 @@ class GSExtractCoordsOutputs(Enum):
 
 
 class ProtGapStopExtractCoords(ProtGapStopBase):
-    """Extracts coordinates from scores maps produced by template matching with GAPSTOP(TM)."""
+    """Extracts coordinates from score maps produced by template matching with GAPSTOP(TM)."""
 
     _label = 'extract coordinates'
     _devStatus = BETA

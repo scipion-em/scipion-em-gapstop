@@ -20,7 +20,8 @@ Scipion plugin for GAPSTOP_TM
 
 This plugin provides a wrapper around the program `GAPSTOP_TM <https://bturo.pages.mpcdf.de/gapstop_tm/index.html>`_
 (GPU-Accelerated Python STOPgap for Template Matching) to use it within
-`Scipion <https://scipion-em.github.io/docs/release-3.0.0/index.html>`_ framework.
+`Scipion <https://scipion-em.github.io/docs/release-3.0.0/index.html>`_ framework. The library
+`cryoCAT <https://cryocat.readthedocs.io/latest/index.html>`_ is also integrated as part of the plugin.
 
 Installation
 ------------
@@ -55,16 +56,22 @@ To check the installation, simply run the following Scipion test for the plugin:
 
         scipion3 tests gapstop.tests.tests_gapstop.Testgapstop
 
+To check the installation, simply run one of the tests. A complete list of tests can be displayed by executing
+
+    .. code-block::
+
+        scipion3 tests --grep gapstop --show
+
 Protocols
 -----------
 
-TBD
+* **Template matching** : Generate score and angular maps from the introduced tomograms from which the coordinates can be extracted with the protocol 'Extract coordinates'.
+* **Extract coordinates** : Extracts coordinates from score maps produced by template matching with GAPSTOP(TM).
 
 Latest plugin versions
 ----------------------
 
 If you want to check the latest version and release history go to `CHANGES <https://github.com/scipion-em-reliotomo/gapstop/blob/master/CHANGES.txt>`_
-
 
 References
 ----------
