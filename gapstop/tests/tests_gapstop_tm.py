@@ -184,5 +184,6 @@ class TestGapStopTM(TestBaseCentralizedLayer):
         self.checkCoordinates(outCoords=coords,
                               expectedBoxSize=particleDiameter,
                               expectedSRate=sRateBin8,
-                              orientedParticles=True)
+                              orientedParticles=True,
+                              orientedTolPercent=0.01)  # 1%
         self.assertTrue(coords.getSize() > 2000)
