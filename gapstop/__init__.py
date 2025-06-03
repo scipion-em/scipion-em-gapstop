@@ -33,9 +33,9 @@ from gapstop.constants import GAPSTOP_ENV_ACTIVATION, GAPSTOP_DEFAULT_ACTIVATION
     GAPSTOP_03
 from pyworkflow.utils import Environ
 
-__version__ = '3.0.0'
+__version__ = '3.0.1'
 _logo = "icon.png"
-_references = ['CruzLeon2024']
+_references = ['Wan2024', 'CruzLeon2024']
 
 
 class Plugin(pwem.Plugin):
