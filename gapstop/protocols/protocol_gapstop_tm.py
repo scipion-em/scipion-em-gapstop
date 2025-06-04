@@ -63,7 +63,6 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
     _label = 'template matching'
     _devStatus = BETA
     _possibleOutputs = GapStopTMOutputs
-    stepsExecutionMode = STEPS_PARALLEL
     program = 'gapstop'
 
     def __init__(self, **kwargs):
