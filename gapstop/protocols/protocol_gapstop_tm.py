@@ -161,7 +161,6 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
                        default='0',
                        label="Choose GPU IDs",
                        help='GPU device/s to be used.')
-        form.addParallelSection(threads=1, mpi=0)
 
     # --------------------------- INSERT steps functions ----------------------
     def _insertAllSteps(self):
