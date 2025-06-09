@@ -4,5 +4,5 @@ v3.0.1:
    - Template matching: serialization: now the tomograms are processed one by one, but using all the GPU/s
      specified for each one instead of parallelized execution using one GPU per tomogram.
   Developers:
-   - Adding dependencies: cycler, packaging, mrcfile, kiwisolver, mrcfile
+   - Adding dependencies: cycler, packaging, mrcfile, kiwisolver, mrcfile.
 v3.0.0: First release.
