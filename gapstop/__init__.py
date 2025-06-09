@@ -75,6 +75,10 @@ class Plugin(pwem.Plugin):
         # Create the environment and activate the conda environment
         condaEnvCmd = cls.getCondaActivationCmd()
         condaEnvCmd += f' conda create -y -n {GAPSTOP_ENV_NAME} -c conda-forge python=3.10 '
+        condaEnvCmd += 'mrcfile '
+        condaEnvCmd += 'kiwisolver '
+        condaEnvCmd += 'packaging '
+        condaEnvCmd += 'python-dateutil '
         condaEnvCmd += 'mpi4py '
         condaEnvCmd += 'jax '
         condaEnvCmd += '"jaxlib=*=*cuda*" jax && '
