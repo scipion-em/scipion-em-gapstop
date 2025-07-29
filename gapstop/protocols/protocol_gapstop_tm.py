@@ -514,11 +514,17 @@ drop_nan_columns=True)
     def _validate(self) -> List[str]:
         valMsg = []
         tsSet = self._getFormAttrib(IN_TS_SET)
-        tsSetRel = self._getTsFromRelations()
+        inVol = self._getFormAttrib(REF_VOL)
+        inMask = self._getFormAttrib(IN_MASK)
+        
         if not tsSet:
+            tsSetRel = self._getTsFromRelations()
             if not tsSetRel or not self.currentBin.get():
                 valMsg.append('Unable to find via relations the tilt-series corresponding to the '
                               'introduced tomograms. Please introduce them manually (advanced parameters).')
+        if np.abs(inVol.getSamplingRate() - inMask.getSamplingRate())>0.1:
+            valMsg.append('The template and the mask do not present the same pixel size. Please resample or'
+                          'resize one of them.')
         return valMsg
 
     def _summary(self) -> List[str]:

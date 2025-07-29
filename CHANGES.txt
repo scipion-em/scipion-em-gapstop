@@ -1,3 +1,6 @@
+v3.0.2:
+  Users:
+   - A validator was added to ensure the same sampling rate for the template and the mask
 v3.0.1:
   Users:
    - Add a second reference (original stopGap paper) for citation.
