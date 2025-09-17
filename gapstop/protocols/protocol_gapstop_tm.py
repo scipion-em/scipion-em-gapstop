@@ -203,7 +203,7 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
         tsIds = set(tsSet.getTSIds())
         ctfTsIds = set(ctfSet.getTSIds())
         presentTsIds = tomosTsIds & tsIds & ctfTsIds
-        nonMatchingTsIds = (tomosTsIds ^ tsIds ^ ctfTsIds) - (tomosTsIds & tsIds & ctfTsIds)
+        nonMatchingTsIds = tomosTsIds ^ tsIds ^ ctfTsIds
 
         # Validate the intersection
         if len(presentTsIds) <= 0:
