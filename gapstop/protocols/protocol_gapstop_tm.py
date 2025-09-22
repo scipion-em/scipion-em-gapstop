@@ -25,6 +25,7 @@
 # *
 # **************************************************************************
 import logging
+import traceback
 from enum import Enum
 from os.path import abspath, join, basename
 from typing import Union, List
@@ -39,12 +40,12 @@ from pwem.emlib.image import ImageHandler
 from pwem.objects import VolumeMask, Volume
 from pyworkflow import BETA
 from pyworkflow.object import Set, String
-from pyworkflow.protocol import STEPS_PARALLEL, PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, BooleanParam, \
+from pyworkflow.protocol import PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, BooleanParam, \
     LEVEL_ADVANCED
-from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr
+from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr, redStr
 from scipion.constants import PYTHON
 from tomo.objects import SetOfTiltSeries, CTFTomo
-from tomo.utils import getObjFromRelation
+from tomo.utils import getObjFromRelation, getCommonTsAndCtfElements
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
         tsIds = set(tsSet.getTSIds())
         ctfTsIds = set(ctfSet.getTSIds())
         presentTsIds = tomosTsIds & tsIds & ctfTsIds
-        nonMatchingTsIds = (tomosTsIds ^ tsIds ^ ctfTsIds) - (tomosTsIds & tsIds & ctfTsIds)
+        nonMatchingTsIds = tomosTsIds ^ tsIds ^ ctfTsIds
 
         # Validate the intersection
         if len(presentTsIds) <= 0:
@@ -221,61 +222,78 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
                         if ctf.getTsId() in presentTsIds}
 
     def convertReferenceStep(self):
-        # Convert or link the reference
-        ref = self._getFormAttrib(REF_VOL)
-        if self.doInvertRefContrast.get():
-            self._invertReference(ref)
-        else:
-            self._convertOrLinkVolume(ref, self.refName)
-        # Convert or link the mask
-        mask = self._getFormAttrib(IN_MASK)
-        self._convertOrLinkVolume(mask, self.maskName)
+        logger.info(cyanStr(f"Converting the reference in the required format...'"))
+        try:
+            # Convert or link the reference
+            ref = self._getFormAttrib(REF_VOL)
+            if self.doInvertRefContrast.get():
+                self._invertReference(ref)
+            else:
+                self._convertOrLinkVolume(ref, self.refName)
+            # Convert or link the mask
+            mask = self._getFormAttrib(IN_MASK)
+            self._convertOrLinkVolume(mask, self.maskName)
+        except Exception as e:
+            raise Exception(f'Reference conversion failed with the exception -> {e}')
 
     def prepareAnglesStep(self):
-        logger.info(cyanStr('Generating the file with Euler angles specifying the rotations...'))
-        angleListFile = self._getCryoCatAngleFile()
-        codePatch = f""" 
+        try:
+            logger.info(cyanStr('Generating the file with Euler angles specifying the rotations...'))
+            angleListFile = self._getCryoCatAngleFile()
+            codePatch = f""" 
 from cryocat import geom 
 import numpy as np 
 
 angles = geom.generate_angles({self.coneAngle.get()}, {self.coneSampling.get()}, symmetry={self.rotSymDeg.get()}) 
 np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',') 
 """
-
-        genAnglesPythonFile = self._getExtraPath('prepAngles.py')
-        with open(genAnglesPythonFile, "w") as pyFile:
-            pyFile.write(codePatch)
-        Plugin.runGapStop(self, PYTHON, genAnglesPythonFile, isCryoCatExec=True)
+            genAnglesPythonFile = self._getExtraPath('prepAngles.py')
+            with open(genAnglesPythonFile, "w") as pyFile:
+                pyFile.write(codePatch)
+            Plugin.runGapStop(self, PYTHON, genAnglesPythonFile, isCryoCatExec=True)
+        except Exception as e:
+            raise Exception(f'Angles file generation with the exception -> {e}')
 
     def convertInputStep(self, tsId: str):
         try:
             tomo = self.tomoDict[tsId]
             ts = self.tsDict[tsId]
             ctf = self.ctfDict[tsId]
+            presentAcqOrders = getCommonTsAndCtfElements(ts, ctf)
+            if len(presentAcqOrders) == 0:
+                raise Exception(f'tsId = {tsId} -> No common acquisition orders found between the '
+                                f'tilt-series and the CTF.')
+
+            logger.info(cyanStr(f"tsId = {tsId} -> present acquisition orders in both "
+                                f"the tilt-series and the CTF are {presentAcqOrders}.'"))
+            
             acq = ts.getAcquisition()
             tomoObjId = tomo.getObjId()
             tsDir = self._getCurrentTomoDir(tsId)
             makePath(tsDir)
 
             # Convert or link the current tomogram
-            logger.info(cyanStr(f'tsId: {tsId}: converting or linking the tomogram...'))
+            logger.info(cyanStr(f'tsId = {tsId}: converting or linking the tomogram...'))
             inTomoName = self._getWorkingTsIdFile(tsId, MRC)
             self._convertOrLinkVolume(tomo, inTomoName)
 
             #  Defocus info:
             # "defocus1", "defocus2", "astigmatism", "phase_shift", "defocus_mean"
-            logger.info(cyanStr(f'tsId: {tsId}: generating the wedge list file...'))
-            nImgs = len(ctf)
+            logger.info(cyanStr(f'tsId = {tsId}: generating the wedge list file...'))
+            nImgs = len(presentAcqOrders)
             defocusData = np.zeros((nImgs, 5))
-            for i, ctfTomo in enumerate(ctf.iterItems(orderBy=[CTFTomo.INDEX_FIELD], direction='ASC')):
-                defocusData[i, 0] = ctfTomo.getDefocusU()
-                defocusData[i, 1] = ctfTomo.getDefocusV()
-                defocusData[i, 2] = ctfTomo.getDefocusAngle()
-                defocusData[i, 4] = (ctfTomo.getDefocusU() + ctfTomo.getDefocusV()) / 2
+            counter = 0
+            for ctfTomo in ctf.iterItems(orderBy=[CTFTomo.INDEX_FIELD], direction='ASC'):
+                if ctfTomo.getAcquisitionOrder() in presentAcqOrders:
+                    defocusData[counter, 0] = ctfTomo.getDefocusU()
+                    defocusData[counter, 1] = ctfTomo.getDefocusV()
+                    defocusData[counter, 2] = ctfTomo.getDefocusAngle()
+                    defocusData[counter, 4] = (ctfTomo.getDefocusU() + ctfTomo.getDefocusV()) / 2
+                    counter += 1
 
             # Tilt angles and dose
             inTltName = self._getWorkingTsIdFile(tsId, TLT)
-            ts.generateTltFile(inTltName, includeDose=True)
+            ts.generateTltFile(inTltName, presentAcqOrders=presentAcqOrders, includeDose=True)
             tltDoseData = np.loadtxt(inTltName)
             tltData = tltDoseData[:, 0]
             doseData = tltDoseData[:, 1]
@@ -315,24 +333,31 @@ drop_nan_columns=True)
             self._fixWedgesFile(wedgesStarFile)
 
             # Generate the tm_params.star
-            logger.info(cyanStr(f'tsId: {tsId}: generating the tm_params.star file...'))
+            logger.info(cyanStr(f'tsId = {tsId}: generating the tm_params.star file...'))
             self._createTmParamsFile(tsId, tomoObjId)
-        except:
+        except Exception as e:
             self.failedTsIds.append(tsId)
+            logger.error(redStr(f'tsId = {tsId} -> input conversion failed with the exception -> {e}'))
+            logger.error(traceback.format_exc())
 
     def templateMatchingStep(self, tsId: str):
-        if tsId not in self.failedTsIds:
-            try:
-                logger.info(cyanStr(f'===> tsId = {tsId}: performing the template matching...'))
-                args = 'run_tm '
-                args += f'-n {self.nTiles.get()} '
-                args += f'{self._genTmParamFileName(tsId)}'
-                Plugin.runGapStop(self, self.program, args)
-            except:
-                self.failedTsIds.append(tsId)
+        if tsId in self.failedTsIds:
+            return
+        try:
+            logger.info(cyanStr(f'===> tsId = {tsId}: performing the template matching...'))
+            args = 'run_tm '
+            args += f'-n {self.nTiles.get()} '
+            args += f'{self._genTmParamFileName(tsId)}'
+            Plugin.runGapStop(self, self.program, args)
+        except Exception as e:
+            self.failedTsIds.append(tsId)
+            logger.error(redStr(f'tsId = {tsId} -> gapStopTM execution failed with the exception -> {e}'))
+            logger.error(traceback.format_exc())
 
     def createOutputStep(self, tsId: str):
-        if tsId not in self.failedTsIds:
+        if tsId in self.failedTsIds:
+            return
+        try:
             with self._lock:
                 tomo = self.tomoDict[tsId]
                 convertedOrLinkedTomoFile = self._getWorkingTsIdFile(tsId, MRC)
@@ -354,6 +379,9 @@ drop_nan_columns=True)
                 scoreTomoSet.append(scoreTomo)
                 scoreTomoSet.write()
                 self._store(scoreTomoSet)
+        except Exception as e:
+            logger.error(redStr(f'tsId = {tsId} -> Unable to register the output with exception {e}. Skipping... '))
+            logger.error(traceback.format_exc())
 
     def closeOutputSetStep(self):
         scoreTomoSet = getattr(self, self._possibleOutputs.scoreTomogrmas.name, None)
@@ -362,7 +390,7 @@ drop_nan_columns=True)
         else:
             raise Exception('No gapStopTM scored tomograms were generated. Maybe the tomograms are too large '
                             'for the GPU/s used. Consider to bin them before and/or introduce a higher number in '
-                            'the parameter "No. tiles to descompose the tomogram".')
+                            'the parameter "No. tiles to discompose the tomogram".')
         if self.failedTsIds:
             self.failedTsIdsStr.set(str(self.failedTsIds))
             self._store(self.failedTsIdsStr)
