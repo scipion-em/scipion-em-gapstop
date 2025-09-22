@@ -1,4 +1,4 @@
-v3.0.2:
+v3.1.0:
   Users:
    - Add excluded views management for both the tilt-series and the CTF.
    - A validator was added to ensure the same sampling rate for the template and the mask.

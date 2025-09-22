@@ -280,7 +280,7 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
             #  Defocus info:
             # "defocus1", "defocus2", "astigmatism", "phase_shift", "defocus_mean"
             logger.info(cyanStr(f'tsId = {tsId}: generating the wedge list file...'))
-            nImgs = len(ctf)
+            nImgs = len(presentAcqOrders)
             defocusData = np.zeros((nImgs, 5))
             counter = 0
             for ctfTomo in ctf.iterItems(orderBy=[CTFTomo.INDEX_FIELD], direction='ASC'):
