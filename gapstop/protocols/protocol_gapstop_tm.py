@@ -36,6 +36,7 @@ from gapstop import Plugin
 from gapstop.constants import *
 from gapstop.objects import SetOfGapStopScoreTomograms, GapStopScoreTomogram
 from gapstop.protocols.protocol_base import ProtGapStopBase
+from pwem.convert.headers import setMRCSamplingRate
 from pwem.emlib.image import ImageHandler
 from pwem.objects import VolumeMask, Volume
 from pyworkflow import BETA
@@ -368,6 +369,7 @@ drop_nan_columns=True)
                 scoresMap = self._getResultsFile(tsId, self._getResultsBName(SCORES, tomoNum))
                 anglesMap = self._getResultsFile(tsId, self._getResultsBName(ANGLES, tomoNum))
                 anglesList = self._getCryoCatAngleFile()
+                setMRCSamplingRate(scoresMap, tomo.getSamplingRate())  # Update the apix value in file header
                 scoreTomo.setTsId(tsId)
                 scoreTomo.setFileName(scoresMap)
                 scoreTomo.setTomoFile(convertedOrLinkedTomoFile)
