@@ -1,3 +1,8 @@
+v3.1.0:
+  Users:
+   - Add excluded views management for both the tilt-series and the CTF.
+   - A validator was added to ensure the same sampling rate for the template and the mask.
+   - The sampling rate is properly set in the header of the generated scored tomograms.
 v3.0.1:
   Users:
    - Add a second reference (original stopGap paper) for citation.
