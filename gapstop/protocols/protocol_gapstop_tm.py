@@ -310,12 +310,11 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
             raise Exception(f'Angles file generation with the exception -> {e}')
 
     def prepareCustomAngStep(self):
-        """Generate custom angular sampling for template matching (ZXZ convention, radians).
+        """Generate custom angular sampling for template matching (ZXZ convention, degrees).
         User defines custom ranges and steps for each Euler angle (alpha, beta, gamma)."""
         try:
             logger.info(cyanStr('Generating the file with custom Euler angles specifying the rotations...'))
             angleListFile = self._getCustomAngleFile()
-            deg2rad = np.pi / 180.0
 
             # Get user-defined ranges (end values are exclusive in arange, so we add step to include end)
             alphaStart = self.alphaStart.get()
@@ -333,16 +332,13 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
             beta_deg = np.arange(betaStart, betaEnd + betaStep, betaStep)  # +step to include end
             gamma_deg = np.arange(gammaStart, gammaEnd, gammaStep)
 
-            # Generate all combinations and convert to radians
+            # Generate all combinations (keep in degrees)
             angles = []
             for a_deg, b_deg, g_deg in itertools.product(alpha_deg, beta_deg, gamma_deg):
-                a = a_deg * deg2rad
-                b = b_deg * deg2rad
-                g = g_deg * deg2rad
-                angles.append([a, b, g])
+                angles.append([a_deg, b_deg, g_deg])
 
             angles = np.array(angles)
-            np.savetxt(angleListFile, angles, fmt='%.6f', delimiter=',')
+            np.savetxt(angleListFile, angles, fmt='%.2f', delimiter=',')
             logger.info(cyanStr(f'Generated {len(angles)} angular triplets in {angleListFile}'))
         except Exception as e:
             raise Exception(f'Custom angles file generation failed with the exception -> {e}')
