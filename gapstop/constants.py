@@ -46,6 +46,7 @@ IN_TS_SET = 'inTsSet'
 REF_VOL = 'reference'
 IN_MASK = 'mask'
 IN_SCORE_TOMOS = 'inScoreTomos'
+IN_TOMO_MASKS = 'inTomoMasks'
 # Files and extensions
 MRC = '.mrc'
 EM = '.em'
