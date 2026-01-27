@@ -31,9 +31,11 @@ import pwem
 from gapstop.constants import GAPSTOP_ENV_ACTIVATION, GAPSTOP_DEFAULT_ACTIVATION_CMD, GAPSTOP, \
     GAPSTOP_CUDA_LIB, GAPSTOP_HOME, GAPSTOP_ENV_NAME, CRYOCAT, CRYOCAT_DEFAULT_VERSION, GAPSTOP_DEFAULT_VERSION, \
     GAPSTOP_03
+
+from pyworkflow import TOMO
 from pyworkflow.utils import Environ
 
-__version__ = '3.1.0'
+__version__ = '3.2.0'
 _logo = "icon.png"
 _references = ['Wan2024', 'CruzLeon2024']
 
@@ -42,6 +44,7 @@ class Plugin(pwem.Plugin):
     _pathVars = [GAPSTOP_CUDA_LIB]
     _supportedVersions = [GAPSTOP_03]
     _url = "https://github.com/scipion-em/scipion-em-gapstop"
+    _processingField = [TOMO]
 
     @classmethod
     def _defineVariables(cls):

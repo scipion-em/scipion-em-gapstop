@@ -44,6 +44,7 @@ from pyworkflow.object import Set, String
 from pyworkflow.protocol import PointerParam, FloatParam, StringParam, IntParam, GPU_LIST, BooleanParam, \
     LEVEL_ADVANCED
 from pyworkflow.utils import Message, makePath, getExt, createLink, cyanStr, redStr
+import itertools
 from scipion.constants import PYTHON
 from tomo.objects import SetOfTiltSeries, CTFTomo
 from tomo.utils import getObjFromRelation, getCommonTsAndCtfElements
@@ -145,6 +146,53 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
                       label='Degree of rotational symmetry',
                       help='From 1, 2, ... to N, representing symmetries C1, C2, ... to CN, respectively. In case '
                            'of non-rotational symmetry, set it ti 1 (default).')
+        # Custom angular sampling parameters
+        form.addParam('useCustomAngSampling', BooleanParam,
+                      default=False,
+                      label='Set custom angular sampling',
+                      help='If set to Yes, you can define custom angular ranges and steps for each Euler angle '
+                           '(alpha, beta, gamma) in ZXZ convention. This overrides the cone angle and cone sampling '
+                           'parameters above.')
+        groupCustomAng = form.addGroup('Custom angular ranges',
+                                       condition='useCustomAngSampling')
+        groupCustomAng.addParam('alphaStart', FloatParam,
+                                default=0,
+                                label='Alpha start (deg.)',
+                                help='Start angle for alpha (Z rotation). Range: [0, 360)')
+        groupCustomAng.addParam('alphaEnd', FloatParam,
+                                default=360,
+                                label='Alpha end (deg.)',
+                                help='End angle for alpha (Z rotation). Range: (0, 360]')
+        groupCustomAng.addParam('alphaStep', FloatParam,
+                                default=10,
+                                label='Alpha step (deg.)',
+                                help='Step size for alpha angle sampling.')
+        groupCustomAng.addParam('betaStart', FloatParam,
+                                default=40,
+                                label='Beta start (deg.)',
+                                help='Start angle for beta (X tilt). Range: [0, 180]. '
+                                     'For example, 40-140 leaves ±50° missing caps.')
+        groupCustomAng.addParam('betaEnd', FloatParam,
+                                default=140,
+                                label='Beta end (deg.)',
+                                help='End angle for beta (X tilt). Range: [0, 180]. '
+                                     'For example, 40-140 leaves ±50° missing caps.')
+        groupCustomAng.addParam('betaStep', FloatParam,
+                                default=10,
+                                label='Beta step (deg.)',
+                                help='Step size for beta angle sampling.')
+        groupCustomAng.addParam('gammaStart', FloatParam,
+                                default=0,
+                                label='Gamma start (deg.)',
+                                help='Start angle for gamma (Z rotation). Range: [0, 360)')
+        groupCustomAng.addParam('gammaEnd', FloatParam,
+                                default=360,
+                                label='Gamma end (deg.)',
+                                help='End angle for gamma (Z rotation). Range: (0, 360]')
+        groupCustomAng.addParam('gammaStep', FloatParam,
+                                default=10,
+                                label='Gamma step (deg.)',
+                                help='Step size for gamma angle sampling.')
         form.addSection(label='Template filtering')
         form.addParam('lowPassFilter', FloatParam,
                       default=20,
@@ -171,9 +219,15 @@ class ProtGapStopTemplateMatching(ProtGapStopBase):
         cRId = self._insertFunctionStep(self.convertReferenceStep,
                                         prerequisites=[],
                                         needsGPU=False)
-        pAngId = self._insertFunctionStep(self.prepareAnglesStep,
-                                          prerequisites=cRId,
-                                          needsGPU=False)
+        # Choose the appropriate angle preparation step based on user choice
+        if self.useCustomAngSampling.get():
+            pAngId = self._insertFunctionStep(self.prepareCustomAngStep,
+                                              prerequisites=cRId,
+                                              needsGPU=False)
+        else:
+            pAngId = self._insertFunctionStep(self.prepareAnglesStep,
+                                              prerequisites=cRId,
+                                              needsGPU=False)
         for tsId in self.tomoDict.keys():
             cInputId = self._insertFunctionStep(self.convertInputStep, tsId,
                                                 prerequisites=pAngId,
@@ -254,6 +308,40 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
             Plugin.runGapStop(self, PYTHON, genAnglesPythonFile, isCryoCatExec=True)
         except Exception as e:
             raise Exception(f'Angles file generation with the exception -> {e}')
+
+    def prepareCustomAngStep(self):
+        """Generate custom angular sampling for template matching (ZXZ convention, degrees).
+        User defines custom ranges and steps for each Euler angle (alpha, beta, gamma)."""
+        try:
+            logger.info(cyanStr('Generating the file with custom Euler angles specifying the rotations...'))
+            angleListFile = self._getCustomAngleFile()
+
+            # Get user-defined ranges (end values are exclusive in arange, so we add step to include end)
+            alphaStart = self.alphaStart.get()
+            alphaEnd = self.alphaEnd.get()
+            alphaStep = self.alphaStep.get()
+            betaStart = self.betaStart.get()
+            betaEnd = self.betaEnd.get()
+            betaStep = self.betaStep.get()
+            gammaStart = self.gammaStart.get()
+            gammaEnd = self.gammaEnd.get()
+            gammaStep = self.gammaStep.get()
+
+            # Generate angle arrays in degrees
+            alpha_deg = np.arange(alphaStart, alphaEnd + alphaStep, alphaStep)  # +step to include end
+            beta_deg = np.arange(betaStart, betaEnd + betaStep, betaStep)  # +step to include end
+            gamma_deg = np.arange(gammaStart, gammaEnd + gammaStep, gammaStep)  # +step to include end
+
+            # Generate all combinations (keep in degrees)
+            angles = []
+            for a_deg, b_deg, g_deg in itertools.product(alpha_deg, beta_deg, gamma_deg):
+                angles.append([a_deg, b_deg, g_deg])
+
+            angles = np.array(angles)
+            np.savetxt(angleListFile, angles, fmt='%.2f', delimiter=',')
+            logger.info(cyanStr(f'Generated {len(angles)} angular triplets in {angleListFile}'))
+        except Exception as e:
+            raise Exception(f'Custom angles file generation failed with the exception -> {e}')
 
     def convertInputStep(self, tsId: str):
         try:
@@ -368,7 +456,7 @@ drop_nan_columns=True)
                 scoreTomo = GapStopScoreTomogram()
                 scoresMap = self._getResultsFile(tsId, self._getResultsBName(SCORES, tomoNum))
                 anglesMap = self._getResultsFile(tsId, self._getResultsBName(ANGLES, tomoNum))
-                anglesList = self._getCryoCatAngleFile()
+                anglesList = self._getAngleFile()
                 setMRCSamplingRate(scoresMap, tomo.getSamplingRate())  # Update the apix value in file header
                 scoreTomo.setTsId(tsId)
                 scoreTomo.setFileName(scoresMap)
@@ -436,6 +524,17 @@ drop_nan_columns=True)
     def _getCryoCatAngleFile(self) -> str:
         return self._getExtraPath(f'angles_{self.coneSampling.get():.0f}_{self._getSymmetry()}.txt')
 
+    def _getCustomAngleFile(self) -> str:
+        """Returns the path for custom angle file when using custom angular sampling."""
+        return self._getExtraPath(f'custom_angles_{self._getSymmetry()}.txt')
+
+    def _getAngleFile(self) -> str:
+        """Returns the appropriate angle file path based on whether custom sampling is used."""
+        if self.useCustomAngSampling.get():
+            return self._getCustomAngleFile()
+        else:
+            return self._getCryoCatAngleFile()
+
     def _getCryoCatWedgesFiles(self, tsId: str) -> str:
         return join(self._getCurrentTomoDir(tsId), 'wedges.star')
 
@@ -500,7 +599,7 @@ drop_nan_columns=True)
                 join('..', basename(self.maskName)),  # tomo_mask_name
                 f'{self._getSymmetry()}',  # symmetry
                 'zxz',  # angslist_order
-                join('..', basename(self._getCryoCatAngleFile())),  # anglist_name
+                join('..', basename(self._getAngleFile())),  # anglist_name
                 SCORES,  # smap_name
                 ANGLES,  # omap_name
                 self.lowPassFilter.get(),  # lp_rad

@@ -40,7 +40,7 @@ from pyworkflow.protocol import PointerParam, IntParam, FloatParam, GT, STEPS_PA
 from pyworkflow.utils import Message, makePath
 from scipion.constants import PYTHON
 from tomo.constants import BOTTOM_LEFT_CORNER
-from tomo.objects import SetOfCoordinates3D, Tomogram, Coordinate3D, SetOfTomograms
+from tomo.objects import SetOfCoordinates3D, Tomogram, Coordinate3D, SetOfTomograms, SetOfTomoMasks
 from tomo.utils import getObjFromRelation
 
 
@@ -60,6 +60,7 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
         super().__init__(**kwargs)
         self.scoreTomoDict = None
         self.tomoSet = None
+        self.tomoMasksDict = None
 
     # --------------------------- DEFINE param functions ----------------------
     def _defineParams(self, form):
@@ -102,6 +103,13 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
                       help='If set to -1, all the coordinates resulting after having applied the particle diameter '
                            'and the score threshold will be saved. Any other case, the first N coordinates, sorted '
                            'by score, will be saved.')
+        form.addParam(IN_TOMO_MASKS, PointerParam,
+                      pointerClass='SetOfTomoMasks',
+                      allowsNull=True,
+                      label='Tomogram masks (opt.)',
+                      help='Optional set of tomogram masks. If provided, coordinates will only be extracted '
+                           'from regions where the mask value is non-zero. Each mask should correspond to a '
+                           'tomogram by its tsId.')
         form.addParallelSection(threads=1, mpi=0)
 
     # --------------------------- INSERT steps functions ----------------------
@@ -125,6 +133,12 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
         scoreTomoSet = self._getFormAttrib(IN_SCORE_TOMOS)
         self.scoreTomoDict = {sTomo.getTsId(): sTomo.clone() for sTomo in scoreTomoSet.iterItems()}
         self.tomoSet = self._getTomosFromRelations()
+        # Initialize tomo masks dictionary if provided
+        tomoMasksSet = self._getFormAttrib(IN_TOMO_MASKS)
+        if tomoMasksSet:
+            self.tomoMasksDict = {tomoMask.getTsId(): tomoMask.clone() for tomoMask in tomoMasksSet.iterItems()}
+        else:
+            self.tomoMasksDict = {}
 
     def extractCoordinatesStep(self, tsId: str):
         sTomo = self.scoreTomoDict[tsId]
@@ -132,6 +146,8 @@ class ProtGapStopExtractCoords(ProtGapStopBase):
         makePath(tsIdExtraDir)
         outParticleListFile = self._getTsIdExtraDirFile(tsId, PARTICLE_LIST_FILE)
         scoresMap = sTomo.getFileName()
+        # Get tomo_mask path if available for this tsId
+        tomoMaskPath = self._getTomoMaskPath(tsId)
         # scores_threshold = {self.scoresThreshold.get()},
         codePatch = f"""
 from cryocat import tmana        
@@ -151,7 +167,8 @@ output_path='{outParticleListFile}',
 output_type='emmotl',
 angles_order='zxz',
 symmetry='{sTomo.getSymmetry()}',
-angles_numbering=0)
+angles_numbering=0,
+tomo_mask={tomoMaskPath})
 """
         extractCoordsPythonFile = join(tsIdExtraDir, 'extractCoords.py')
         with open(extractCoordsPythonFile, "w") as pyFile:
@@ -193,6 +210,14 @@ angles_numbering=0)
     def _getTomosFromRelations(self) -> SetOfTomograms:
         inScoreTomos = self._getFormAttrib(IN_SCORE_TOMOS)
         return getObjFromRelation(inScoreTomos, self, SetOfTomograms)
+
+    def _getTomoMaskPath(self, tsId: str) -> str:
+        """Returns the tomo mask path for a given tsId, or None if not available.
+        The return value is formatted as a string for use in generated Python code."""
+        if self.tomoMasksDict and tsId in self.tomoMasksDict:
+            maskPath = self.tomoMasksDict[tsId].getFileName()
+            return f"'{maskPath}'"
+        return 'None'
 
     def _getScorePercentileValue(self, tomoFileName: str) -> float:
         with mrcfile.mmap(tomoFileName) as mrc:
