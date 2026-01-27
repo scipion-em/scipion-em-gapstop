@@ -1,3 +1,9 @@
+v3.2.0:
+ Users:
+  * Thanks to M. Harastani!
+  - Added tomogram mask parameter to coordinate extraction protocol, allowing filtering of coordinates by mask regions
+  - Implemented custom angular sampling with user-defined ranges for each Euler angle (alpha, beta, gamma) in ZXZ convention
+  - Added conditional logic to select between standard cone-based and custom angular sampling methods
 v3.1.0:
   Users:
    - Add excluded views management for both the tilt-series and the CTF.

@@ -35,7 +35,7 @@ from gapstop.constants import GAPSTOP_ENV_ACTIVATION, GAPSTOP_DEFAULT_ACTIVATION
 from pyworkflow import TOMO
 from pyworkflow.utils import Environ
 
-__version__ = '3.1.0'
+__version__ = '3.2.0'
 _logo = "icon.png"
 _references = ['Wan2024', 'CruzLeon2024']
 
