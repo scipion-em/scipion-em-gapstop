@@ -328,9 +328,9 @@ np.savetxt('{angleListFile}', angles, fmt='%.2f', delimiter=',')
             gammaStep = self.gammaStep.get()
 
             # Generate angle arrays in degrees
-            alpha_deg = np.arange(alphaStart, alphaEnd, alphaStep)
+            alpha_deg = np.arange(alphaStart, alphaEnd + alphaStep, alphaStep)  # +step to include end
             beta_deg = np.arange(betaStart, betaEnd + betaStep, betaStep)  # +step to include end
-            gamma_deg = np.arange(gammaStart, gammaEnd, gammaStep)
+            gamma_deg = np.arange(gammaStart, gammaEnd + gammaStep, gammaStep)  # +step to include end
 
             # Generate all combinations (keep in degrees)
             angles = []
