@@ -83,8 +83,10 @@ class Plugin(pwem.Plugin):
         condaEnvCmd += 'packaging '
         condaEnvCmd += 'python-dateutil '
         condaEnvCmd += 'mpi4py '
-        condaEnvCmd += 'jax '
-        condaEnvCmd += '"jaxlib=*=*cuda*" jax && '
+        # condaEnvCmd += 'jax '
+        condaEnvCmd += 'cuda-cudart cuda-version=12 '
+        condaEnvCmd += '"jaxlib=*=*cuda*" jax '
+        condaEnvCmd += 'nccl && '
         condaEnvCmd += f'conda activate {GAPSTOP_ENV_NAME} && '
         condaEnvCmd += f'touch {CONDA_ENV_INSTALLED}'
 
