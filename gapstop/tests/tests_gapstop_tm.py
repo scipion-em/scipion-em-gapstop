@@ -26,17 +26,15 @@
 # **************************************************************************
 from os.path import exists
 from typing import Union, List, Tuple
-
 from cistem.protocols import CistemProtTsCtffind
 from gapstop.objects import SetOfGapStopScoreTomograms
 from imod.constants import OUTPUT_TILTSERIES_NAME
 from imod.protocols import ProtImodExcludeViews
-from pwem.objects import VolumeMask, Volume
+from pwem.objects import VolumeMask
 from tomo.objects import SetOfCTFTomoSeries, SetOfTiltSeries, SetOfCoordinates3D, TiltSeries, CTFTomoSeries, \
     SetOfTomograms
-from xmipp3.protocols import XmippProtCropResizeVolumes, XmippProtCreateMask3D
 from gapstop.protocols import ProtGapStopTemplateMatching, ProtGapStopExtractCoords
-from pwem.protocols import ProtImportVolumes
+from pwem.protocols import ProtImportMask, ProtImportVolumes
 from pyworkflow.tests import setupTestProject, DataSet
 from pyworkflow.utils import magentaStr, cyanStr
 from tomo.protocols import ProtImportTs, ProtImportTsCTF, ProtImportTomograms
@@ -85,9 +83,8 @@ class TestGapStopTM(TestBaseCentralizedLayer):
         if eVCtf:
             cls._excludeSetViews(importedCtfs, excludedViewsDict=cls.ctfExcludedViewsDict)
         cls.tomoNoFidBin8 = cls._runImportTomograms()
-        importedRefBin4 = cls._runImportReference()
-        cls.refBin8 = cls._runCropResizeVolBin8(importedRefBin4)
-        cls.maskBin8 = cls._runCreateMask3D()
+        cls.maskBin8 = cls._runImportMaskBin8()
+        cls.refBin8 = cls._runImportReferenceBin8()
         print(
             cyanStr('\n-------------------------------- PREVIOUS PROTOCOLS FINISHED ---------------------------------'))
         return importedTs, importedCtfs
@@ -155,45 +152,29 @@ class TestGapStopTM(TestBaseCentralizedLayer):
         protImportTomos = cls.newProtocol(ProtImportTomograms,
                                           filesPath=cls.ds.getFile(DataSetRe4STATuto.tomogramsNoFidPath.value),
                                           filesPattern='*.mrc',
-                                          samplingRate=cls.unbinnedSRate * cls.binFactor8)  # Bin 8
+                                          samplingRate=cls.sRateBin8)  # Bin 8
         cls.launchProtocol(protImportTomos)
         outTomos = getattr(protImportTomos, OUTPUT_NAME, None)
         return outTomos
 
     @classmethod
-    def _runImportReference(cls) -> Volume:
+    def _runImportMaskBin8(cls) -> VolumeMask:
+        print(magentaStr("\n==> Resizing the reference to bin 8:"))
+        protImportMask3D = cls.newProtocol(ProtImportMask,
+                                           maskPath=cls.ds.getFile(DataSetRe4STATuto.maskHivBin8.value),
+                                           samplingRate=cls.sRateBin8)  # Bin 8
+        cls.launchProtocol(protImportMask3D)
+        mask = getattr(protImportMask3D, 'outputMask', None)
+        return mask
+
+    @classmethod
+    def _runImportReferenceBin8(cls):
         print(magentaStr("\n==> Importing the reference volume:"))
         protImportRef = cls.newProtocol(ProtImportVolumes,
-                                        filesPath=cls.ds.getFile(DataSetRe4STATuto.initModelRelion.name),
-                                        samplingRate=cls.unbinnedSRate * cls.binFactor4)
+                                        filesPath=cls.ds.getFile(DataSetRe4STATuto.referenceHivBin8.value),
+                                        samplingRate=cls.sRateBin8)  # Bin 8
         cls.launchProtocol(protImportRef)
         return getattr(protImportRef, ProtImportVolumes._possibleOutputs.outputVolume.name, None)
-
-    @classmethod
-    def _runCropResizeVolBin8(cls, inVol: Volume) -> VolumeMask:
-        print(magentaStr("\n==> Resizing the reference to bin 8:"))
-        protCropResize = cls.newProtocol(XmippProtCropResizeVolumes,
-                                         inputVolumes=inVol,
-                                         doResize=True,
-                                         resizeOption=0,  # RESIZE_SAMPLINGRATE,
-                                         resizeSamplingRate=cls.unbinnedSRate * cls.binFactor8)
-        cls.launchProtocol(protCropResize)
-        outputMask = getattr(protCropResize, 'outputVol', None)
-        return outputMask
-
-    @classmethod
-    def _runCreateMask3D(cls) -> VolumeMask:
-        print(magentaStr("\n==> Creating the reference mask:"))
-        protCreateMask = cls.newProtocol(XmippProtCreateMask3D,
-                                         source=1,  # Geometry
-                                         samplingRate=cls.unbinnedSRate * cls.binFactor8,
-                                         size=48,
-                                         geo=3,  # Cylinder
-                                         radius=18,
-                                         height=18,
-                                         sigmaConvolution=3)
-        cls.launchProtocol(protCreateMask)
-        return getattr(protCreateMask, 'outputMask', None)
 
     @classmethod
     def _runExcludeViewsProt(cls,
