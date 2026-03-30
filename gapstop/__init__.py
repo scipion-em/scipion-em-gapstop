@@ -35,7 +35,7 @@ from gapstop.constants import GAPSTOP_ENV_ACTIVATION, GAPSTOP_DEFAULT_ACTIVATION
 from pyworkflow import TOMO
 from pyworkflow.utils import Environ
 
-__version__ = '3.2.0'
+__version__ = '3.3.0'
 _logo = "icon.png"
 _references = ['Wan2024', 'CruzLeon2024']
 
@@ -83,8 +83,10 @@ class Plugin(pwem.Plugin):
         condaEnvCmd += 'packaging '
         condaEnvCmd += 'python-dateutil '
         condaEnvCmd += 'mpi4py '
-        condaEnvCmd += 'jax '
-        condaEnvCmd += '"jaxlib=*=*cuda*" jax && '
+        # condaEnvCmd += 'jax '
+        condaEnvCmd += 'cuda-cudart cuda-version=12 '
+        condaEnvCmd += '"jaxlib=*=*cuda*" jax '
+        condaEnvCmd += 'nccl && '
         condaEnvCmd += f'conda activate {GAPSTOP_ENV_NAME} && '
         condaEnvCmd += f'touch {CONDA_ENV_INSTALLED}'
 
