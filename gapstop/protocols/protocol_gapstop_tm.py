@@ -57,10 +57,192 @@ class GapStopTMOutputs(Enum):
 
 
 class ProtGapStopTemplateMatching(ProtGapStopBase):
-    """GAPSTOPTM is able to leverage the power of GPU accelerated multi-node HPC systems to be efficiently
-    used for template matching. It speeds up template matching by using an MPI-parallel layout and offloading
-    the compute-heavy correlation kernel to one or more accelerator devices per MPI-process using jax.
-    The template matching in GAPSTOPTM is algorithmically based on STOPGAP developed by W. Wan’s lab.
+    """
+    Performs GPU-accelerated template matching on cryo-electron tomography datasets using
+    GAPSTOPTM. The protocol detects candidate molecular complexes inside tomograms by
+    comparing a reference structure against volumetric data over a wide range of orientations
+    and spatial positions.
+
+    AI Generated:
+
+    GapStop Template Matching (ProtGapStopTemplateMatching) - User Manual
+        Overview
+
+        The GapStop Template Matching protocol is designed for large-scale template matching
+        in cryo-electron tomography workflows. Its purpose is to identify regions inside
+        tomograms that resemble a known structural template, allowing researchers to locate
+        macromolecular assemblies directly within crowded cellular environments. The protocol
+        is optimized for modern GPU clusters and distributed high-performance computing
+        systems, making it suitable for demanding in situ structural biology projects.
+
+        In practical biological applications, template matching is commonly used to detect
+        ribosomes, membrane-bound complexes, viral particles, cytoskeletal assemblies, or
+        other macromolecules whose approximate structure is already known. Instead of
+        reconstructing particles individually before localization, the protocol searches the
+        tomogram directly and generates volumetric score maps that estimate how well the
+        template matches every possible position and orientation.
+
+        The protocol is particularly valuable in workflows involving large tomograms or large
+        collections of tomographic reconstructions, where exhaustive searches would otherwise
+        become computationally prohibitive. By combining GPU acceleration with parallel
+        processing strategies, the protocol enables practical execution of searches that would
+        traditionally require very long runtimes.
+
+        Inputs and Experimental Context
+
+        The protocol requires a set of tomograms together with a reference volume representing
+        the expected molecular structure. In many cryo-ET studies, this reference originates
+        from subtomogram averaging, single-particle cryo-EM, or atomic modeling workflows.
+        The closer the reference resembles the biological target, the more reliable the
+        resulting detections are expected to be.
+
+        Optionally, tilt-series and CTF information can also be provided. These inputs improve
+        the physical realism of the matching process because they allow the protocol to model
+        missing wedge effects and acquisition-dependent imaging properties. This becomes
+        particularly important in high-resolution or low-contrast datasets where imaging
+        artifacts strongly influence detectability.
+
+        Biological users should ensure that tomograms, references, and masks are all
+        compatible in sampling rate and overall scale. Mismatches in voxel size or spatial
+        dimensions may lead to poor localization accuracy or biologically misleading results.
+
+        Reference Contrast and Biological Interpretation
+
+        A critical aspect of template matching is the contrast relationship between the
+        template and the tomograms. Cryo-electron tomography datasets frequently display
+        biological densities as dark features, whereas reference maps from other workflows may
+        appear inverted. The protocol therefore allows contrast inversion of the template when
+        needed.
+
+        From a biological perspective, proper contrast matching is essential because template
+        matching relies on correlation between structural features. Incorrect contrast
+        orientation may suppress true detections and artificially enhance noise. When using
+        references imported from external reconstruction software, users should visually
+        verify that densities appear with the same polarity as in the tomograms before
+        starting large-scale searches.
+
+        Masking and Search Focus
+
+        The reference mask is one of the most biologically important components of the
+        workflow. The mask defines which regions of the template contribute to the matching
+        calculation and therefore determines the structural features emphasized during the
+        search.
+
+        Compact masks focused on stable structural cores usually provide the most robust
+        detections. For example, when searching for flexible membrane complexes, excluding
+        highly mobile peripheral regions often improves localization accuracy substantially.
+        In contrast, excessively large masks may include solvent or unrelated densities that
+        dilute the specificity of the correlation scores.
+
+        The protocol also uses the mask to restrict the interpretation of score maps,
+        ensuring that the reported signals correspond primarily to biologically relevant
+        structural regions. Thoughtful mask design is therefore essential for reliable
+        downstream analysis.
+
+        Angular Sampling Strategies
+
+        Template matching requires systematic exploration of molecular orientations. The
+        protocol provides both standard and fully customizable angular sampling schemes. In
+        routine applications, users typically define a cone angle and angular sampling step,
+        which together determine how densely orientation space is explored.
+
+        Wider angular coverage increases the likelihood of detecting molecules in arbitrary
+        orientations but also increases computational cost. Finer angular sampling improves
+        orientation precision but may substantially increase runtime. Biological users should
+        therefore balance sensitivity against computational feasibility according to the
+        expected structural variability of the target.
+
+        Advanced users may define explicit angular ranges for individual Euler angles. This
+        becomes particularly useful when prior biological knowledge limits the expected
+        orientations of a complex. For example, membrane-associated proteins may preferentially
+        adopt constrained orientations relative to membranes, allowing users to reduce the
+        search space and accelerate processing.
+
+        Symmetry Considerations
+
+        Rotational symmetry can significantly improve both efficiency and robustness during
+        template matching. When the target complex possesses known cyclic symmetry, the
+        protocol can incorporate this information directly into the search process.
+
+        Correct symmetry specification reduces redundant orientation sampling and strengthens
+        biologically meaningful correlations. However, incorrect symmetry assumptions may
+        artificially bias detections or hide asymmetric structural features. Users should only
+        apply symmetry constraints when they are well supported by structural evidence.
+
+        Template Filtering and Resolution Control
+
+        The protocol allows low-pass and high-pass filtering of the template prior to
+        matching. These filters control which spatial frequencies contribute to the search
+        and therefore influence both sensitivity and specificity.
+
+        In most biological applications, moderate low-pass filtering improves robustness by
+        emphasizing large-scale structural features while suppressing high-frequency noise.
+        High-pass filtering is generally less critical but may help reduce large-scale
+        background variations in certain datasets.
+
+        The optimal filtering strategy depends strongly on tomogram quality, expected target
+        size, and biological heterogeneity. Flexible or partially disordered complexes often
+        benefit from lower-resolution searches focused on stable global architecture rather
+        than fine structural details.
+
+        Tomogram Tiling and Large-Scale Processing
+
+        Large tomograms can exceed GPU memory limits during template matching. To address this,
+        the protocol supports tomogram decomposition into smaller computational tiles. This
+        strategy enables efficient processing of very large cellular volumes while preserving
+        scalability across multiple GPUs and compute nodes.
+
+        Increasing the number of tiles may reduce memory pressure and improve execution
+        stability, although excessively fine decomposition can increase runtime overhead.
+        Biological users working with thick cellular tomograms or very large fields of view
+        commonly rely on tiling strategies to maintain practical performance.
+
+        Outputs and Their Interpretation
+
+        The primary outputs are score tomograms and orientation maps. The score maps indicate
+        how strongly the reference matches each spatial location inside the tomogram, while
+        the orientation maps record the angular assignment associated with each detection.
+
+        High-scoring regions represent candidate molecular localizations that can be further
+        analyzed or converted into coordinate sets for downstream subtomogram extraction and
+        averaging workflows. However, biological interpretation requires caution because high
+        scores do not automatically guarantee true positives. Crowded environments, repetitive
+        structures, and imaging artifacts can produce misleading correlations.
+
+        For this reason, template matching results are typically followed by additional
+        validation steps such as coordinate clustering, subtomogram averaging, classification,
+        or manual inspection. Biological confidence emerges from the consistency of evidence
+        across multiple stages of analysis rather than from correlation values alone.
+
+        Practical Recommendations
+
+        In routine cryo-ET workflows, users should begin with conservative angular sampling
+        and moderate filtering parameters to establish baseline detections. If targets are
+        difficult to identify, improving the mask or adjusting the angular search density
+        often provides larger gains than aggressively increasing computational complexity.
+
+        When working with noisy cellular tomograms, lower-resolution templates frequently
+        outperform highly detailed references because they emphasize robust structural
+        signatures. Similarly, introducing biologically informed orientation constraints may
+        greatly improve both speed and specificity.
+
+        Users processing large datasets on GPU clusters should carefully monitor memory usage
+        and consider increasing tomogram tiling when failures occur. Binning tomograms before
+        matching is also a common strategy for exploratory searches or for very large cellular
+        reconstructions.
+
+        Final Perspective
+
+        Template matching is one of the central techniques in in situ structural biology
+        because it bridges the gap between molecular structure determination and cellular
+        context. The GapStop Template Matching protocol provides a scalable and biologically
+        oriented framework for detecting macromolecular assemblies directly inside tomograms
+        while leveraging modern GPU computing resources.
+
+        Reliable results depend not only on computational performance but also on thoughtful
+        biological decisions regarding template selection, masking strategy, angular sampling,
+        filtering, and interpretation of score maps. When used carefully, the protocol enables
+        powerful exploration of molecular organization within native cellular environments.
     """
 
     _label = 'template matching'
