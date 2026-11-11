@@ -1,3 +1,4 @@
+v3.3.1: fix the angles convention in the angular part of the extracted coordinates.
 v3.3.0:
  Users: update the installer.
  Developers: remove the dependency on Xmipp from the tests.

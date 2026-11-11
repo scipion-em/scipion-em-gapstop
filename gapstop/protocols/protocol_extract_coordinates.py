@@ -301,6 +301,8 @@ np.save('{outParticlesNpyFile}', data)
         tilt = np.deg2rad(float(tilt))
         R = transformations.euler_matrix(tdrot, tilt, narot, axes='szxz')
         R = R[:3, :3]
+        # GapStop's angles rotate the template into the particle, and Scipion stores the inverse
+        R = np.linalg.inv(R)
         Sscipion = - np.dot(R, Sgapstop)
         M[:3, :3] = R
         M[:3, 3] = Sscipion
